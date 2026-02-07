@@ -41,19 +41,10 @@ def global_exception_handler(request, exc):
     )
 
 
-# CORS - allow frontend (and Vite dev server from any host)
+# CORS - allow all origins for deployment
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3003",
-        "http://127.0.0.1:3003",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:8001",
-        "http://127.0.0.1:8001",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
