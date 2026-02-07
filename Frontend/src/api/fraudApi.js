@@ -1,6 +1,6 @@
-// In dev: use same origin so Vite proxy (vite.config.js) forwards /api to backend. No CORS.
-// In prod or if VITE_API_URL is set: use that or backend at 127.0.0.1:8001.
-const API_BASE_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? '' : 'http://127.0.0.1:8001');
+// In dev: if VITE_API_URL is not set, use same origin (Vite proxy).
+// In prod or if VITE_API_URL is set: use that URL. Fallback to localhost if nothing else is available.
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : 'http://127.0.0.1:8001');
 
 // Helper function to get auth token from localStorage
 const getAuthToken = () => {
@@ -11,7 +11,7 @@ const getAuthToken = () => {
 const handleFetchError = (err, endpoint) => {
   if (err.message === 'Failed to fetch' || err.name === 'TypeError') {
     return new Error(
-      'Cannot reach the server. Make sure the backend is running: in the backend folder run "python main.py 8001"'
+      'Cannot reach the server. Please check your internet connection or try again later.'
     );
   }
   return err;
