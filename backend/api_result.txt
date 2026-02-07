@@ -1,0 +1,14 @@
+{
+  "predictions": [
+    {
+      "prediction_id": 10,
+      "fraud_score": 0.5,
+      "risk_level": "Medium",
+      "recommended_action": "Verify",
+      "reasons": [
+        "Error in prediction: 'ColumnTransformer' object has no attribute '_name_to_fitted_passthrough'"
+      ]
+    }
+  ],
+  "total_processed": 1
+}
