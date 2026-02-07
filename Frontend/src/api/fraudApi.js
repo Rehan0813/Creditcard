@@ -77,6 +77,7 @@ export const fraudApi = {
 
   // File upload
   async uploadFile(file) {
+    console.log(`[fraudApi] Uploading file to: ${API_BASE_URL}/api/files/upload`);
     const formData = new FormData();
     formData.append('file', file);
 
@@ -86,18 +87,28 @@ export const fraudApi = {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${API_BASE_URL}/api/files/upload`, {
-      method: 'POST',
-      headers,
-      body: formData,
-    });
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/files/upload`, {
+        method: 'POST',
+        headers,
+        body: formData,
+      });
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-      throw new Error(error.detail || `HTTP error! status: ${response.status}`);
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+        console.error('[fraudApi] Upload response error:', error);
+        throw new Error(error.detail || `HTTP error! status: ${response.status}`);
+      }
+
+      return await response.json();
+    } catch (err) {
+      console.error('[fraudApi] Fetch catch error:', err);
+      // Re-throw with more context
+      if (err.message === 'Failed to fetch') {
+        throw new Error(`Connection error: Cannot reach ${API_BASE_URL}. Possible CORS issue or server is down.`);
+      }
+      throw err;
     }
-
-    return await response.json();
   },
 
   async getFiles() {

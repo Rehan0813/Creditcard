@@ -42,10 +42,12 @@ def global_exception_handler(request, exc):
 
 
 # CORS - allow all origins for deployment
+# Note: When allow_credentials=True, allow_origins cannot be ["*"]
+# We must specify origins or use a wildcard-friendly approach
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False, # Set to False if using origins=["*"]
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -84,7 +86,8 @@ def get_current_user(
 
 # Pydantic models for request/response
 class SignupRequest(BaseModel):
-    name: str
+    name: Optional[str] = None
+    username: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
     password: str
@@ -284,9 +287,18 @@ def _build_pipeline_input_df(engineered_df: pd.DataFrame) -> pd.DataFrame:
 
 
 # Authentication endpoints
+@app.post("/register", response_model=AuthResponse)
+@app.post("/api/auth/register", response_model=AuthResponse)
 @app.post("/api/auth/signup", response_model=AuthResponse)
 def signup(request: SignupRequest, db: Session = Depends(get_db)):
     """Sign up a new user with email OR phone"""
+    # Map username to name if needed for compatibility
+    if not request.name and request.username:
+        request.name = request.username
+        
+    if not request.name:
+        request.name = "User" # Fallback if both missing
+        
     print(f"DEBUG: signup request: {request}")
     
     if not request.email and not request.phone:
