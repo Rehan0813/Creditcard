@@ -1,6 +1,9 @@
-// Dev: no VITE_API_URL → use Vite proxy (''). Prod: use VITE_API_URL or Render backend so deployed frontend works.
+// Local dev: always use Vite proxy ('' → backend on 8001). Production: use VITE_API_URL or Render default.
+// This way the same code works locally and on Render without changing .env.
 const DEFAULT_PRODUCTION_API = 'https://creditcard-backend-q0vl.onrender.com';
-const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '' : DEFAULT_PRODUCTION_API);
+const API_BASE_URL = import.meta.env.DEV
+  ? ''
+  : (import.meta.env.VITE_API_URL || DEFAULT_PRODUCTION_API);
 
 // Helper function to get auth token from localStorage
 const getAuthToken = () => {
@@ -123,10 +126,18 @@ export const fraudApi = {
     });
   },
 
-  async predictFromFile(fileId) {
-    return await apiRequest(`/api/predict/file/${fileId}`, {
-      method: 'POST',
-    });
+  /** Get list of transactions (rows) from an uploaded file so user can choose which to analyze. */
+  async getFileTransactions(fileId) {
+    return await apiRequest(`/api/files/${fileId}/transactions`);
+  },
+
+  /** Run fraud detection on selected rows. rowIndices: array of 0-based row indices; if omitted, backend uses first 5. */
+  async predictFromFile(fileId, rowIndices = null) {
+    const options = { method: 'POST' };
+    if (rowIndices != null && Array.isArray(rowIndices) && rowIndices.length > 0) {
+      options.body = JSON.stringify({ row_indices: rowIndices });
+    }
+    return await apiRequest(`/api/predict/file/${fileId}`, options);
   },
 
   async getPredictions() {

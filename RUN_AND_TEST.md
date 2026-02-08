@@ -1,62 +1,71 @@
-# Run Backend + Frontend and Test
+# Run Backend + Frontend and Test (local)
+
+The app is set up so **the same code works locally and on Render**—no .env changes when switching.  
+Locally, the frontend always talks to your local backend (via Vite proxy). Production builds use the Render URL.
+
+---
 
 ## 1. Start the backend
 
-Open a terminal:
+In a terminal:
 
 ```bash
 cd backend
 python main.py
 ```
 
-You should see: `[Backend] Running. Test: http://127.0.0.1:8001/api/health | Frontend: http://localhost:3003`  
+You should see: `[Backend] Running on 0.0.0.0:8001` and `Local test: http://127.0.0.1:8001/api/health`.  
 Leave this terminal open.
 
 ---
 
-## 2. Test backend with PowerShell (optional)
+## 2. Start the frontend
 
 In a **new** terminal:
+
+```bash
+cd Frontend
+npm run dev
+```
+
+Vite will open the app (or go to the URL it prints, usually **http://localhost:3000**).
+
+---
+
+## 3. Use the app locally
+
+- Open the app at **http://localhost:3000** (or the URL Vite shows).
+- **Sign up** → name, then **either** email **or** phone, then password.
+- **Log in** → same email or phone and password.
+- **Upload a CSV** and click **Analyze Fraud Detection**. Requests go to your local backend on port 8001 via the proxy.
+
+If you see "Cannot reach the server" or "Not Found":
+- Make sure the **backend is running** (step 1) on port 8001.
+- Use **http://localhost:3000** (or the Vite URL), not 127.0.0.1 or a different port.
+
+---
+
+## 4. Optional: test backend only
 
 ```powershell
 cd backend
 powershell -ExecutionPolicy Bypass -File test_backend.ps1
 ```
 
-You should see `[PASS]` for health. Signup/login may show `[PASS]` or "already exists" / 401 if the user exists.
+Or open **http://127.0.0.1:8001/docs** for Swagger.
 
 ---
 
-## 3. Start the frontend
-
-In a terminal:
-
-```bash
-cd "Frontend (2)/Frontend"
-npm run dev
-```
-
-**Important:** Open the app at **http://localhost:3003** (use `localhost`, not 127.0.0.1 or a Network URL).  
-The frontend uses the Vite proxy so `/api` requests go to the backend without CORS issues.
-
----
-
-## 4. Test in the browser
-
-- **Sign up**: Name, then **either** email **or** phone, then password. Click Sign Up.
-- **Log in**: Same email or phone and password. Click Login.
-
-If you see "Cannot reach the server":
-- Ensure the backend is running (step 1).
-- Open the app at **http://localhost:3003** (not 0.0.0.0 or another host).
-
----
-
-## Ports
+## Ports (local)
 
 | Service   | URL                     |
 |----------|-------------------------|
 | Backend  | http://127.0.0.1:8001   |
-| Frontend | http://localhost:3003   |
+| Frontend | http://localhost:3000   (Vite default in this project) |
 
-API docs: http://127.0.0.1:8001/docs (use this in the browser, not 0.0.0.0)
+---
+
+## Deploy on Render
+
+- Backend and frontend code stay the same. Production build uses `VITE_API_URL` from the build env or the default Render backend URL.
+- See `backend/RENDER_DEPLOY.md` for backend env vars and start commands.

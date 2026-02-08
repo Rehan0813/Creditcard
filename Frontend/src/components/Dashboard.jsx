@@ -13,6 +13,9 @@ const Dashboard = ({ result, setResult, setCurrentPage }) => {
   const [schemaValid, setSchemaValid] = useState(false);
   const [showAnalysisReport, setShowAnalysisReport] = useState(false);
   const [showFeedbackPanel, setShowFeedbackPanel] = useState(false);
+  const [fileId, setFileId] = useState(null);
+  const [transactions, setTransactions] = useState([]);
+  const [selectedRowIndices, setSelectedRowIndices] = useState([]);
   const [feedbackData, setFeedbackData] = useState({
     humanDecision: '',
     reasons: [],
@@ -25,6 +28,9 @@ const Dashboard = ({ result, setResult, setCurrentPage }) => {
   // Enhanced state setters that also save to global state
   const setFileWithBackup = (newFile) => {
     setFile(newFile);
+    setFileId(null);
+    setTransactions([]);
+    setSelectedRowIndices([]);
     if (typeof window !== 'undefined') {
       window.dashboardState.file = newFile;
     }
@@ -187,134 +193,84 @@ const Dashboard = ({ result, setResult, setCurrentPage }) => {
     }, 3500);
   };
 
+  const runAnalysisOnSelectedRows = async (overrideRowIndices = null, overrideFileId = null) => {
+    const indices = overrideRowIndices != null ? overrideRowIndices : selectedRowIndices;
+    const fid = overrideFileId != null ? overrideFileId : fileId;
+    if (!fid || indices.length === 0) {
+      alert('Please select at least one transaction to analyze.');
+      return;
+    }
+    setIsAnalyzing(true);
+    try {
+      const predictionResponse = await fraudApi.predictFromFile(fid, indices);
+      const backendPredictions = predictionResponse.predictions || [];
+      const firstPrediction = backendPredictions.length > 0 ? backendPredictions[0] : null;
+      if (backendPredictions.length === 0) {
+        throw new Error('No predictions generated for the selected rows.');
+      }
+      applyPredictionResult(backendPredictions, firstPrediction, indices, transactions);
+    } catch (err) {
+      console.error(err);
+      alert(err.message || 'Analysis failed.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const applyPredictionResult = (backendPredictions, firstPrediction, selectedIndices, transactionsList) => {
+    sessionStorage.setItem('dashboardFile', JSON.stringify(file));
+    sessionStorage.setItem('dashboardSchemaValid', JSON.stringify(schemaValid));
+
+    const rl = firstPrediction.risk_level;
+    const riskEmoji = rl === 'High' ? '🔴' : (rl === 'Medium' ? '🟡' : '🟢');
+
+    const firstIdx = selectedIndices && selectedIndices.length > 0 ? selectedIndices[0] : 0;
+    const tx = transactionsList && transactionsList[firstIdx] ? transactionsList[firstIdx] : null;
+
+    setResult({
+      score: (firstPrediction.fraud_score || 0).toFixed(2),
+      riskLevel: rl,
+      riskEmoji,
+      action: firstPrediction.recommended_action,
+      reasons: firstPrediction.reasons || [],
+      prediction_id: firstPrediction.prediction_id,
+      transactionId: tx ? `TXN-${firstPrediction.prediction_id}` : `TXN-${firstPrediction.prediction_id}`,
+      amount: tx ? tx.amount : (firstPrediction.amount ?? 'Unknown'),
+      country: tx ? tx.country : (firstPrediction.country ?? 'Unknown'),
+      merchantCategory: tx ? tx.merchant_category : (firstPrediction.merchant_category ?? 'Unknown'),
+      paymentMethod: tx ? tx.payment_method : (firstPrediction.payment_method ?? 'Unknown'),
+      transactionTime: tx ? tx.transaction_time : (firstPrediction.transaction_time ?? new Date().toLocaleString()),
+      allPredictions: backendPredictions.length > 1 ? backendPredictions : undefined,
+      selectedIndices: selectedIndices,
+      transactionsList: transactionsList
+    });
+    setCurrentPage('analysisreport');
+  };
+
   const analyzeFile = async () => {
     if (!file) {
       alert('Please upload a file first');
       return;
     }
-
     setIsAnalyzing(true);
-
     try {
-      // 1. Upload the file to the backend
       const uploadResponse = await fraudApi.uploadFile(file);
-      const fileId = uploadResponse.file_id;
-
-      // 2. Predict from the uploaded file
-      const predictionResponse = await fraudApi.predictFromFile(fileId);
-
-      console.log('Backend Prediction Response:', predictionResponse);
-      const backendPredictions = predictionResponse.predictions || [];
-      const firstPrediction = backendPredictions.length > 0 ? backendPredictions[0] : null;
-      console.log('Total predictions:', backendPredictions.length);
-
-      if (backendPredictions.length === 0) {
-        throw new Error('No predictions generated for this file.');
+      const fid = uploadResponse.file_id;
+      setFileId(fid);
+      const { transactions: txList } = await fraudApi.getFileTransactions(fid);
+      setTransactions(txList || []);
+      if (!txList || txList.length === 0) {
+        throw new Error('No transactions found in this file.');
       }
-
-      // Preserve state before showing analysis report
-      sessionStorage.setItem('dashboardFile', JSON.stringify(file));
-      sessionStorage.setItem('dashboardSchemaValid', JSON.stringify(schemaValid));
-
-      // Read and process the actual CSV file for display data
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const text = e.target.result;
-          const lines = text.split('\n').filter(line => line.trim());
-
-          if (lines.length > 1) {
-            const headers = lines[0].split(',').map(h => h.trim());
-            const dataRows = lines.slice(1, Math.min(6, lines.length)); // Get first 5 data rows
-
-            // Parse the first transaction for detailed analysis
-            const firstTransaction = dataRows[0].split(',').map(d => d.trim());
-
-            // Extract actual data from CSV
-            const transactionData = {
-              headers: headers,
-              rows: dataRows.map(row => row.split(',').map(d => d.trim())),
-              firstTransaction: {
-                transactionId: firstTransaction[headers.indexOf('transaction_id')] || `TXN-${firstPrediction.prediction_id}`,
-                amount: firstTransaction[headers.indexOf('amount')] || firstPrediction.amount || '$0.00',
-                country: firstTransaction[headers.indexOf('country')] || firstPrediction.country || 'Unknown',
-                merchantCategory: firstTransaction[headers.indexOf('merchant_category')] || firstPrediction.merchant_category || 'Unknown',
-                paymentMethod: firstTransaction[headers.indexOf('payment_method')] || firstPrediction.payment_method || 'Unknown',
-                transactionTime: firstTransaction[headers.indexOf('transaction_time')] || new Date().toLocaleString()
-              }
-            };
-
-            // Use backend prediction data
-            const rl = firstPrediction.risk_level;
-            const riskEmoji = rl === 'High' ? '🔴' : (rl === 'Medium' ? '🟡' : '🟢');
-
-            setResult({
-              score: (firstPrediction.fraud_score || 0).toFixed(2),
-              riskLevel: rl,
-              riskEmoji: riskEmoji,
-              action: firstPrediction.recommended_action,
-              reasons: firstPrediction.reasons || [],
-              prediction_id: firstPrediction.prediction_id,
-              ...transactionData.firstTransaction,
-              csvData: transactionData // Store the actual CSV data
-            });
-
-            // Open Analysis Report as full page
-            setCurrentPage('analysisreport');
-          }
-        } catch (error) {
-          console.error('Error reading CSV file:', error);
-          // Still show results even if CSV parsing fails
-          const rl = firstPrediction.risk_level;
-          const riskEmoji = rl === 'High' ? '🔴' : (rl === 'Medium' ? '🟡' : '🟢');
-
-          setResult({
-            score: (firstPrediction.fraud_score || 0).toFixed(2),
-            riskLevel: rl,
-            riskEmoji: riskEmoji,
-            action: firstPrediction.recommended_action,
-            reasons: firstPrediction.reasons || [],
-            prediction_id: firstPrediction.prediction_id,
-            transactionId: `TXN-${firstPrediction.prediction_id}`,
-            amount: firstPrediction.amount || 'Unknown',
-            country: firstPrediction.country || 'Unknown',
-            merchantCategory: firstPrediction.merchant_category || 'Unknown',
-            paymentMethod: firstPrediction.payment_method || 'Unknown',
-            transactionTime: new Date().toLocaleString()
-          });
-
-          setCurrentPage('analysisreport');
-        }
-      };
-
-      reader.onerror = () => {
-        console.error('File reading error');
-        // Still show backend results
-        const rl = firstPrediction.risk_level;
-        const riskEmoji = rl === 'High' ? '🔴' : (rl === 'Medium' ? '🟡' : '🟢');
-
-        setResult({
-          score: (firstPrediction.fraud_score || 0).toFixed(2),
-          riskLevel: rl,
-          riskEmoji: riskEmoji,
-          action: firstPrediction.recommended_action,
-          reasons: firstPrediction.reasons || [],
-          prediction_id: firstPrediction.prediction_id,
-          transactionId: `TXN-${firstPrediction.prediction_id}`,
-          amount: firstPrediction.amount || 'Unknown',
-          country: firstPrediction.country || 'Unknown',
-          merchantCategory: firstPrediction.merchant_category || 'Unknown',
-          paymentMethod: firstPrediction.payment_method || 'Unknown',
-          transactionTime: new Date().toLocaleString()
-        });
-
-        setCurrentPage('analysisreport');
-      };
-
-      reader.readAsText(file);
-    } catch (error) {
-      console.error('Error during analysis:', error);
-      alert(error.message || 'Error communicating with backend. Please make sure the backend is running on port 8001.');
+      if (txList.length === 1) {
+        setSelectedRowIndices([0]);
+        await runAnalysisOnSelectedRows([0], fid);
+        return;
+      }
+      setSelectedRowIndices([0]);
+    } catch (err) {
+      console.error(err);
+      alert(err.message || 'Upload or load failed.');
     } finally {
       setIsAnalyzing(false);
     }
@@ -375,6 +331,107 @@ const Dashboard = ({ result, setResult, setCurrentPage }) => {
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
   };
+
+  if (transactions.length > 1 && fileId) {
+    return (
+      <div style={{
+        position: 'relative',
+        minHeight: '100%',
+        width: '100%',
+        padding: '24px',
+        boxSizing: 'border-box',
+        background: 'transparent'
+      }}>
+        <div style={{ maxWidth: '900px', margin: '0 auto' }}>
+          <button
+            type="button"
+            onClick={() => { setTransactions([]); setFileId(null); setSelectedRowIndices([]); }}
+            style={{
+              marginBottom: '20px',
+              padding: '10px 18px',
+              background: 'rgba(30, 41, 59, 0.9)',
+              border: '1px solid rgba(148, 163, 184, 0.3)',
+              borderRadius: '8px',
+              color: '#e2e8f0',
+              fontSize: '14px',
+              cursor: 'pointer'
+            }}
+          >
+            ← Back to upload
+          </button>
+          <h2 style={{ color: '#f8fafc', fontSize: '22px', fontWeight: '600', marginBottom: '8px' }}>
+            Select transactions to analyze
+          </h2>
+          <p style={{ color: '#94a3b8', fontSize: '14px', marginBottom: '20px' }}>
+            Your file contains {transactions.length} transactions. Choose one or more, then run fraud detection.
+          </p>
+          <div style={{
+            background: 'rgba(30, 41, 59, 0.8)',
+            border: '1px solid rgba(71, 85, 105, 0.5)',
+            borderRadius: '12px',
+            overflow: 'hidden',
+            marginBottom: '20px'
+          }}>
+            <div style={{ overflowX: 'auto', maxHeight: '320px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ background: 'rgba(51, 65, 85, 0.8)', borderBottom: '1px solid rgba(71, 85, 105, 0.6)' }}>
+                    <th style={{ padding: '12px', textAlign: 'left', color: '#94a3b8', fontWeight: '600' }}>#</th>
+                    <th style={{ padding: '12px', textAlign: 'left', color: '#94a3b8', fontWeight: '600' }}>Amount</th>
+                    <th style={{ padding: '12px', textAlign: 'left', color: '#94a3b8', fontWeight: '600' }}>Time</th>
+                    <th style={{ padding: '12px', textAlign: 'left', color: '#94a3b8', fontWeight: '600' }}>Merchant</th>
+                    <th style={{ padding: '12px', textAlign: 'left', color: '#94a3b8', fontWeight: '600' }}>Country</th>
+                    <th style={{ padding: '12px', width: '80px', textAlign: 'center', color: '#94a3b8', fontWeight: '600' }}>Select</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {transactions.map((tx) => (
+                    <tr key={tx.row_index} style={{ borderBottom: '1px solid rgba(71, 85, 105, 0.3)', background: selectedRowIndices.includes(tx.row_index) ? 'rgba(59, 130, 246, 0.08)' : 'transparent' }}>
+                      <td style={{ padding: '10px 12px', color: '#e2e8f0' }}>{tx.row_index + 1}</td>
+                      <td style={{ padding: '10px 12px', color: '#e2e8f0' }}>{tx.amount || '–'}</td>
+                      <td style={{ padding: '10px 12px', color: '#cbd5e1', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(tx.transaction_time || '–').toString().slice(0, 16)}</td>
+                      <td style={{ padding: '10px 12px', color: '#e2e8f0' }}>{tx.merchant_category || '–'}</td>
+                      <td style={{ padding: '10px 12px', color: '#e2e8f0' }}>{tx.country || '–'}</td>
+                      <td style={{ padding: '10px', textAlign: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedRowIndices.includes(tx.row_index)}
+                          onChange={() => {
+                            setSelectedRowIndices((prev) =>
+                              prev.includes(tx.row_index)
+                                ? prev.filter((i) => i !== tx.row_index)
+                                : [...prev, tx.row_index].sort((a, b) => a - b)
+                            );
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => runAnalysisOnSelectedRows()}
+            disabled={isAnalyzing || selectedRowIndices.length === 0}
+            style={{
+              padding: '12px 24px',
+              background: selectedRowIndices.length > 0 && !isAnalyzing ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : 'rgba(71, 85, 105, 0.5)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              fontSize: '14px',
+              fontWeight: '600',
+              cursor: selectedRowIndices.length > 0 && !isAnalyzing ? 'pointer' : 'not-allowed'
+            }}
+          >
+            {isAnalyzing ? 'Analyzing...' : `Analyze selected (${selectedRowIndices.length})`}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -806,8 +863,8 @@ const Dashboard = ({ result, setResult, setCurrentPage }) => {
             </div>
           )}
 
-          {/* Analyze Fraud Detection Button - Only show when file is uploaded AND schema is valid */}
-          {file && schemaValid && (
+          {/* Analyze Fraud Detection Button - show when file is valid and transactions not yet loaded */}
+          {file && schemaValid && transactions.length <= 1 && (
             <div style={{
               width: '100%',
               textAlign: 'center',

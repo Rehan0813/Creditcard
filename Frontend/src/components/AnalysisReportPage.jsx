@@ -10,6 +10,28 @@ const AnalysisReportPage = ({ result, setResult, setCurrentPage }) => {
     setCurrentPage('dashboard');
   };
 
+  const isBatch = result?.allPredictions && result.allPredictions.length > 1;
+  const overallScore = isBatch
+    ? Math.max(...result.allPredictions.map((p) => p.fraud_score ?? 0))
+    : null;
+  const getRiskFromScore = (s) => {
+    if (s < 0.3) return { level: 'Low', emoji: '🟢', action: 'Safe' };
+    if (s < 0.7) return { level: 'Medium', emoji: '🟡', action: 'Verify' };
+    return { level: 'High', emoji: '🔴', action: 'Block' };
+  };
+  const batchRisk = overallScore != null ? getRiskFromScore(overallScore) : null;
+  const displayScore = isBatch && overallScore != null ? overallScore.toFixed(2) : result?.score;
+  const displayLevel = isBatch && batchRisk ? batchRisk.level : result?.riskLevel;
+  const displayEmoji = isBatch && batchRisk ? batchRisk.emoji : result?.riskEmoji;
+  const displayAction = isBatch && batchRisk ? batchRisk.action : result?.action;
+  const highestRiskPrediction = isBatch && result.allPredictions?.length
+    ? result.allPredictions.reduce((a, b) => ((a.fraud_score ?? 0) >= (b.fraud_score ?? 0) ? a : b))
+    : null;
+  const displayReasons = isBatch && highestRiskPrediction?.reasons ? highestRiskPrediction.reasons : result?.reasons || [];
+  const selectedTransactions = isBatch && result.transactionsList && result.selectedIndices?.length
+    ? result.selectedIndices.map((idx) => result.transactionsList[idx]).filter(Boolean)
+    : [];
+
   if (!result) {
     return (
       <div style={{ padding: '40px', minHeight: '100%', background: 'transparent' }}>
@@ -200,40 +222,104 @@ const AnalysisReportPage = ({ result, setResult, setCurrentPage }) => {
 
         <div style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '12px', padding: '24px', marginBottom: '32px' }}>
           <h2 style={{ color: 'white', fontSize: '20px', fontWeight: 'bold', marginBottom: '20px' }}>2️⃣ Transaction Summary</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-            <div style={{ color: '#e5e7eb' }}><div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>Transaction ID</div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>{result.transactionId}</div></div>
-            <div style={{ color: '#e5e7eb' }}><div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>Amount</div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>{result.amount}</div></div>
-            <div style={{ color: '#e5e7eb' }}><div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>Country</div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>{result.country}</div></div>
-            <div style={{ color: '#e5e7eb' }}><div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>Merchant Category</div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>{result.merchantCategory}</div></div>
-            <div style={{ color: '#e5e7eb' }}><div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>Payment Method</div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>{result.paymentMethod}</div></div>
-            <div style={{ color: '#e5e7eb' }}><div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>Transaction Time</div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>{result.transactionTime}</div></div>
-          </div>
+          {isBatch && selectedTransactions.length > 0 ? (
+            <>
+              <p style={{ color: '#94a3b8', fontSize: '14px', marginBottom: '16px' }}>Analyzed {selectedTransactions.length} transactions.</p>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.15)' }}>
+                      <th style={{ padding: '10px', textAlign: 'left', color: '#94a3b8', fontWeight: '600' }}>#</th>
+                      <th style={{ padding: '10px', textAlign: 'left', color: '#94a3b8', fontWeight: '600' }}>Amount</th>
+                      <th style={{ padding: '10px', textAlign: 'left', color: '#94a3b8', fontWeight: '600' }}>Country</th>
+                      <th style={{ padding: '10px', textAlign: 'left', color: '#94a3b8', fontWeight: '600' }}>Merchant Category</th>
+                      <th style={{ padding: '10px', textAlign: 'left', color: '#94a3b8', fontWeight: '600' }}>Payment Method</th>
+                      <th style={{ padding: '10px', textAlign: 'left', color: '#94a3b8', fontWeight: '600' }}>Transaction Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedTransactions.map((tx, i) => (
+                      <tr key={tx.row_index ?? i} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                        <td style={{ padding: '10px', color: '#e2e8f0' }}>{i + 1}</td>
+                        <td style={{ padding: '10px', color: '#e2e8f0' }}>{tx.amount ?? '–'}</td>
+                        <td style={{ padding: '10px', color: '#e2e8f0' }}>{tx.country ?? '–'}</td>
+                        <td style={{ padding: '10px', color: '#e2e8f0' }}>{tx.merchant_category ?? '–'}</td>
+                        <td style={{ padding: '10px', color: '#e2e8f0' }}>{tx.payment_method ?? '–'}</td>
+                        <td style={{ padding: '10px', color: '#cbd5e1' }}>{(tx.transaction_time ?? '–').toString().slice(0, 19)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+              <div style={{ color: '#e5e7eb' }}><div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>Transaction ID</div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>{result.transactionId}</div></div>
+              <div style={{ color: '#e5e7eb' }}><div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>Amount</div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>{result.amount}</div></div>
+              <div style={{ color: '#e5e7eb' }}><div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>Country</div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>{result.country}</div></div>
+              <div style={{ color: '#e5e7eb' }}><div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>Merchant Category</div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>{result.merchantCategory}</div></div>
+              <div style={{ color: '#e5e7eb' }}><div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>Payment Method</div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>{result.paymentMethod}</div></div>
+              <div style={{ color: '#e5e7eb' }}><div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>Transaction Time</div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>{result.transactionTime}</div></div>
+            </div>
+          )}
         </div>
+
+        {result.allPredictions && result.allPredictions.length > 1 && (
+          <div style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '12px', padding: '24px', marginBottom: '32px' }}>
+            <h2 style={{ color: 'white', fontSize: '20px', fontWeight: 'bold', marginBottom: '16px' }}>Per-transaction risk</h2>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.15)' }}>
+                    <th style={{ padding: '10px', textAlign: 'left', color: '#94a3b8' }}>#</th>
+                    <th style={{ padding: '10px', textAlign: 'left', color: '#94a3b8' }}>Risk score</th>
+                    <th style={{ padding: '10px', textAlign: 'left', color: '#94a3b8' }}>Level</th>
+                    <th style={{ padding: '10px', textAlign: 'left', color: '#94a3b8' }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.allPredictions.map((p, i) => (
+                    <tr key={p.prediction_id || i} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                      <td style={{ padding: '10px', color: '#e2e8f0' }}>{i + 1}</td>
+                      <td style={{ padding: '10px', color: '#e2e8f0' }}>{(p.fraud_score ?? 0).toFixed(2)}</td>
+                      <td style={{ padding: '10px', color: '#e2e8f0' }}>{p.risk_level ?? '–'}</td>
+                      <td style={{ padding: '10px', color: p.recommended_action === 'Safe' ? '#10b981' : p.recommended_action === 'Block' ? '#ef4444' : '#f59e0b' }}>{p.recommended_action ?? '–'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         <div style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '12px', padding: '24px', marginBottom: '32px' }}>
           <h2 style={{ color: 'white', fontSize: '20px', fontWeight: 'bold', marginBottom: '20px' }}>3️⃣ Model Prediction</h2>
           <div style={{ display: 'flex', alignItems: 'center', gap: '32px', flexWrap: 'wrap' }}>
             <div style={{ textAlign: 'center', padding: '20px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
               <div style={{ fontSize: '14px', color: '#9ca3af', marginBottom: '8px' }}>Fraud Risk Score</div>
-              <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#f59e0b' }}>{result.score}</div>
+              <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#f59e0b' }}>{displayScore}</div>
             </div>
             <div style={{ textAlign: 'center', padding: '20px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
               <div style={{ fontSize: '14px', color: '#9ca3af', marginBottom: '8px' }}>Risk Level</div>
-              <div style={{ fontSize: '24px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>{result.riskEmoji} {result.riskLevel}</div>
+              <div style={{ fontSize: '24px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>{displayEmoji} {displayLevel}</div>
             </div>
             <div style={{ textAlign: 'center', padding: '20px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
               <div style={{ fontSize: '14px', color: '#9ca3af', marginBottom: '8px' }}>Recommended Action</div>
-              <div style={{ fontSize: '24px', fontWeight: 'bold', color: result.action === 'Safe' ? '#10b981' : result.action === 'Verify' ? '#f59e0b' : '#ef4444' }}>{result.action}</div>
+              <div style={{ fontSize: '24px', fontWeight: 'bold', color: displayAction === 'Safe' ? '#10b981' : displayAction === 'Verify' ? '#f59e0b' : '#ef4444' }}>{displayAction}</div>
             </div>
           </div>
-          <div style={{ marginTop: '16px', padding: '12px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: '8px', color: '#60a5fa', fontSize: '14px', textAlign: 'center' }}>This is the AI's decision based on the transaction analysis.</div>
+          <div style={{ marginTop: '16px', padding: '12px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: '8px', color: '#60a5fa', fontSize: '14px', textAlign: 'center' }}>
+            {isBatch
+              ? `Overall batch risk (highest of ${result.allPredictions.length} transactions). The score above reflects the maximum risk in the batch.`
+              : 'This is the AI\'s decision based on the transaction analysis.'}
+          </div>
         </div>
 
         <div style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '12px', padding: '24px' }}>
           <h2 style={{ color: 'white', fontSize: '20px', fontWeight: 'bold', marginBottom: '20px' }}>4️⃣ Risk Explanation</h2>
-          <div style={{ color: '#e5e7eb', fontSize: '16px', marginBottom: '16px' }}>Why was this transaction flagged?</div>
+          <div style={{ color: '#e5e7eb', fontSize: '16px', marginBottom: '16px' }}>{isBatch ? 'Why was this batch flagged?' : 'Why was this transaction flagged?'}</div>
           <ul style={{ margin: 0, paddingLeft: '20px', color: '#e5e7eb', fontSize: '14px', lineHeight: '1.6' }}>
-            {result.reasons.map((reason, index) => (<li key={index} style={{ marginBottom: '8px' }}>{reason}</li>))}
+            {(displayReasons.length ? displayReasons : result.reasons || []).map((reason, index) => (<li key={index} style={{ marginBottom: '8px' }}>{reason}</li>))}
           </ul>
           <div style={{ marginTop: '16px', padding: '12px', background: 'rgba(34, 197, 94, 0.1)', border: '1px solid rgba(34, 197, 94, 0.3)', borderRadius: '8px', color: '#22c55e', fontSize: '14px', textAlign: 'center' }}>This makes the prediction explainable and transparent.</div>
         </div>

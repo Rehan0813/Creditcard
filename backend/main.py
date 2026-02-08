@@ -131,6 +131,10 @@ class PredictionResponse(BaseModel):
     recommended_action: str
     reasons: List[str]
 
+class PredictFileRequest(BaseModel):
+    """Which rows of the uploaded file to run fraud detection on. row_indices are 0-based."""
+    row_indices: Optional[List[int]] = None  # None = first 5 for backward compat
+
 class FeedbackRequest(BaseModel):
     prediction_id: int
     human_decision: str  # 'fraud' or 'legit'
@@ -450,6 +454,44 @@ def get_files(
         ]
     }
 
+
+@app.get("/api/files/{file_id}/transactions")
+def get_file_transactions(
+    file_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Return list of transactions (rows) from an uploaded file so the user can choose which to analyze."""
+    uploaded_file = db.query(UploadedFile).filter(
+        UploadedFile.id == file_id,
+        UploadedFile.user_id == current_user.id
+    ).first()
+    if not uploaded_file:
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        if uploaded_file.filename.endswith(".csv"):
+            df = pd.read_csv(BytesIO(uploaded_file.file_content))
+        else:
+            df = pd.read_excel(BytesIO(uploaded_file.file_content))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error parsing file: {str(e)}")
+    # Normalize column names to lowercase for response
+    df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
+    display_cols = ["amount", "transaction_time", "merchant_category", "country", "device_type", "payment_method"]
+    transactions = []
+    for idx in range(len(df)):
+        row = df.iloc[idx]
+        item = {"row_index": int(idx)}
+        for k in display_cols:
+            if k in df.columns:
+                v = row[k]
+                item[k] = "" if pd.isna(v) else str(v)
+            else:
+                item[k] = ""
+        transactions.append(item)
+    return {"transactions": transactions, "total": len(transactions)}
+
+
 # Prediction endpoint
 def get_risk_metadata(fraud_score: float, is_fallback: bool = False):
     """Generate risk level, action, and reasons based on fraud score"""
@@ -580,10 +622,11 @@ def predict(
 @app.post("/api/predict/file/{file_id}")
 def predict_from_file(
     file_id: int,
+    body: Optional[PredictFileRequest] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Make predictions from an uploaded file"""
+    """Make predictions for selected rows of an uploaded file. Send { \"row_indices\": [0, 2, 4] } to analyze specific rows; omit for first 5 (backward compat)."""
     # Get file
     uploaded_file = db.query(UploadedFile).filter(
         UploadedFile.id == file_id,
@@ -602,9 +645,17 @@ def predict_from_file(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error parsing file: {str(e)}")
     
-    # Process first transaction (or all if needed)
+    # Which rows to process: user-selected or default first 5
+    if body and body.row_indices is not None and len(body.row_indices) > 0:
+        indices = [i for i in body.row_indices if 0 <= i < len(df)]
+        if not indices:
+            raise HTTPException(status_code=400, detail="No valid row_indices in range for this file.")
+    else:
+        indices = list(range(min(5, len(df))))
+    
     predictions = []
-    for idx, row in df.head(5).iterrows():  # Process first 5 rows
+    for idx in indices:
+        row = df.iloc[idx]
         data = row.to_dict()
         prediction_data = calculate_prediction(data)
         
