@@ -221,7 +221,7 @@ const AnalysisReportPage = ({ result, setResult, setCurrentPage }) => {
         )}
 
         <div style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '12px', padding: '24px', marginBottom: '32px' }}>
-          <h2 style={{ color: 'white', fontSize: '20px', fontWeight: 'bold', marginBottom: '20px' }}>2️⃣ Transaction Summary</h2>
+          <h2 style={{ color: 'white', fontSize: '20px', fontWeight: 'bold', marginBottom: '20px' }}>1️⃣ Transaction Summary</h2>
           {isBatch && selectedTransactions.length > 0 ? (
             <>
               <p style={{ color: '#94a3b8', fontSize: '14px', marginBottom: '16px' }}>Analyzed {selectedTransactions.length} transactions.</p>
@@ -266,7 +266,7 @@ const AnalysisReportPage = ({ result, setResult, setCurrentPage }) => {
 
         {result.allPredictions && result.allPredictions.length > 1 && (
           <div style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '12px', padding: '24px', marginBottom: '32px' }}>
-            <h2 style={{ color: 'white', fontSize: '20px', fontWeight: 'bold', marginBottom: '16px' }}>Per-transaction risk</h2>
+            <h2 style={{ color: 'white', fontSize: '20px', fontWeight: 'bold', marginBottom: '16px' }}>2️⃣ Per-transaction risk</h2>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
                 <thead>
