@@ -57,8 +57,18 @@ security = HTTPBearer()
 
 @app.get("/api/health")
 def health():
-    """Health check for proxy and connectivity."""
-    return {"status": "ok", "message": "Backend is running"}
+    """Health check for proxy and connectivity. Optionally verifies DB."""
+    from sqlalchemy import text
+    out = {"status": "ok", "message": "Backend is running"}
+    try:
+        db = SessionLocal()
+        db.execute(text("SELECT 1"))
+        db.close()
+        out["database"] = "connected"
+    except Exception as e:
+        out["database"] = "error"
+        out["database_error"] = str(e)
+    return out
 
 
 # Dependency to get DB session
@@ -757,8 +767,15 @@ def get_feedback_for_prediction(
 
 if __name__ == "__main__":
     import sys
-    port = 8001
+    # Render (and most PaaS) set PORT; use it so the app listens on the correct port
+    port = int(os.environ.get("PORT", 8001))
     if len(sys.argv) > 1:
         port = int(sys.argv[1])
-    print(f"[Backend] Running. Test: http://127.0.0.1:{port}/api/health  |  Frontend: http://localhost:3003")
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    # Disable reload in production (Render sets PORT; local dev typically does not)
+    is_production = os.environ.get("PORT") is not None
+    print(f"[Backend] Running on 0.0.0.0:{port}  |  Production: {is_production}")
+    if is_production:
+        print(f"[Backend] Health: https://your-app.onrender.com/api/health")
+    else:
+        print(f"[Backend] Local test: http://127.0.0.1:{port}/api/health  |  Frontend: http://localhost:3003")
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=not is_production)
