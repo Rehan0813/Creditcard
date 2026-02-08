@@ -15,7 +15,23 @@ const FeedbackPage = ({ result, setCurrentPage }) => {
     submissionTime: null
   });
 
-  const displayResult = result || { score: '0.00', riskLevel: 'Unknown', action: 'Unknown' };
+  // When multiple transactions (batch), always show the highest risk for feedback
+  const isBatch = result?.allPredictions?.length > 1;
+  const overallScore = isBatch && result?.allPredictions?.length
+    ? Math.max(...result.allPredictions.map((p) => p.fraud_score ?? 0))
+    : null;
+  const getRiskFromScore = (s) => {
+    if (s < 0.3) return { level: 'Low', action: 'Safe' };
+    if (s < 0.7) return { level: 'Medium', action: 'Verify' };
+    return { level: 'High', action: 'Block' };
+  };
+  const batchRisk = overallScore != null ? getRiskFromScore(overallScore) : null;
+  const displayScore = isBatch && overallScore != null ? Number(overallScore).toFixed(2) : result?.score;
+  const displayLevel = isBatch && batchRisk ? batchRisk.level : result?.riskLevel;
+  const displayAction = isBatch && batchRisk ? batchRisk.action : result?.action;
+  const displayResult = result
+    ? { ...result, score: displayScore, riskLevel: displayLevel, action: displayAction }
+    : { score: '0.00', riskLevel: 'Unknown', action: 'Unknown' };
 
   return (
     <div style={{
@@ -80,11 +96,11 @@ const FeedbackPage = ({ result, setCurrentPage }) => {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ color: '#e5e7eb', fontSize: '14px' }}>Model Risk Level:</span>
             <span style={{
-              color: displayResult.riskLevel === 'High Risk' ? '#ef4444' : displayResult.riskLevel === 'Medium Risk' ? '#f59e0b' : '#10b981',
+              color: (displayResult.riskLevel === 'High Risk' || displayResult.riskLevel === 'High') ? '#ef4444' : (displayResult.riskLevel === 'Medium Risk' || displayResult.riskLevel === 'Medium') ? '#f59e0b' : '#10b981',
               fontSize: '14px',
               fontWeight: 'bold',
               padding: '4px 12px',
-              background: displayResult.riskLevel === 'High Risk' ? 'rgba(239, 68, 68, 0.2)' : displayResult.riskLevel === 'Medium Risk' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.2)',
+              background: (displayResult.riskLevel === 'High Risk' || displayResult.riskLevel === 'High') ? 'rgba(239, 68, 68, 0.2)' : (displayResult.riskLevel === 'Medium Risk' || displayResult.riskLevel === 'Medium') ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.2)',
               borderRadius: '6px'
             }}>{displayResult.riskLevel}</span>
           </div>
