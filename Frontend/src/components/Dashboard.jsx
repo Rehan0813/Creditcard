@@ -54,6 +54,28 @@ const Dashboard = ({ result, setResult, setCurrentPage }) => {
     }
   }, []);
 
+  // Batch display for inline report (showAnalysisReport && result)
+  const isBatch = result?.allPredictions?.length > 1;
+  const overallScore = isBatch && result?.allPredictions?.length
+    ? Math.max(...result.allPredictions.map((p) => p.fraud_score ?? 0))
+    : null;
+  const getRiskFromScore = (s) => {
+    if (s < 0.3) return { level: 'Low', emoji: '🟢', action: 'Safe' };
+    if (s < 0.7) return { level: 'Medium', emoji: '🟡', action: 'Verify' };
+    return { level: 'High', emoji: '🔴', action: 'Block' };
+  };
+  const batchRisk = overallScore != null ? getRiskFromScore(overallScore) : null;
+  const displayScore = isBatch && overallScore != null ? Number(overallScore).toFixed(2) : result?.score;
+  const displayLevel = isBatch && batchRisk ? batchRisk.level : result?.riskLevel;
+  const displayEmoji = isBatch && batchRisk ? batchRisk.emoji : result?.riskEmoji;
+  const displayAction = isBatch && batchRisk ? batchRisk.action : result?.action;
+  const highestRiskPrediction = isBatch && result?.allPredictions?.length
+    ? result.allPredictions.reduce((a, b) => ((a.fraud_score ?? 0) >= (b.fraud_score ?? 0) ? a : b))
+    : null;
+  const displayReasons = isBatch && highestRiskPrediction?.reasons ? highestRiskPrediction.reasons : (result?.reasons || []);
+  const reportSection2Label = isBatch ? '3' : '2';
+  const reportSection3Label = isBatch ? '4' : '3';
+
   const handleFileUpload = (e) => {
     const uploadedFile = e.target.files[0];
     if (uploadedFile) {
@@ -1324,9 +1346,103 @@ const Dashboard = ({ result, setResult, setCurrentPage }) => {
               </div>
             )}
 
-            {/* Transaction Summary & Risk Assessment Grid */}
+            {/* 1. Transaction Summary */}
+            <div style={{
+              backgroundColor: 'rgba(236, 72, 153, 0.95)',
+              borderRadius: '20px',
+              padding: '32px',
+              border: '1px solid rgba(236, 72, 153, 0.7)',
+              boxShadow: '0 20px 50px rgba(0, 0, 0, 0.3)',
+              marginBottom: '32px'
+            }}>
+              <h2 style={{ color: 'white', fontSize: '22px', fontWeight: 'bold', marginBottom: '24px' }}>1. Transaction Summary</h2>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+                <div>
+                  <label style={{ color: 'white', opacity: 0.8, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px' }}>Amount</label>
+                  <p style={{ color: 'white', fontSize: '20px', fontWeight: '800', margin: '4px 0' }}>{result.amount}</p>
+                </div>
+                <div>
+                  <label style={{ color: 'white', opacity: 0.8, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px' }}>Country</label>
+                  <p style={{ color: 'white', fontSize: '20px', fontWeight: '800', margin: '4px 0' }}>{result.country}</p>
+                </div>
+                <div>
+                  <label style={{ color: 'white', opacity: 0.8, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px' }}>Category</label>
+                  <p style={{ color: 'white', fontSize: '16px', fontWeight: '600', margin: '4px 0' }}>{result.merchantCategory}</p>
+                </div>
+                <div>
+                  <label style={{ color: 'white', opacity: 0.8, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px' }}>Time</label>
+                  <p style={{ color: 'white', fontSize: '16px', fontWeight: '600', margin: '4px 0' }}>{result.transactionTime}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Per-transaction risk (batch only) */}
+            {isBatch && result.allPredictions && result.allPredictions.length > 1 && (
+              <div style={{
+                backgroundColor: 'rgba(236, 72, 153, 0.95)',
+                borderRadius: '20px',
+                padding: '32px',
+                border: '1px solid rgba(236, 72, 153, 0.7)',
+                boxShadow: '0 20px 50px rgba(0, 0, 0, 0.3)',
+                marginBottom: '32px'
+              }}>
+                <h2 style={{ color: 'white', fontSize: '22px', fontWeight: 'bold', marginBottom: '16px' }}>2. Per-transaction risk</h2>
+                <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                    <thead>
+                      <tr style={{ background: 'rgba(0, 0, 0, 0.2)', borderBottom: '2px solid rgba(255, 255, 255, 0.2)' }}>
+                        <th style={{ padding: '12px', textAlign: 'left', color: 'white', fontWeight: 'bold' }}>#</th>
+                        <th style={{ padding: '12px', textAlign: 'left', color: 'white', fontWeight: 'bold' }}>Risk score</th>
+                        <th style={{ padding: '12px', textAlign: 'left', color: 'white', fontWeight: 'bold' }}>Level</th>
+                        <th style={{ padding: '12px', textAlign: 'left', color: 'white', fontWeight: 'bold' }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.allPredictions.map((p, i) => (
+                        <tr key={p.prediction_id || i} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                          <td style={{ padding: '12px', color: 'white' }}>{i + 1}</td>
+                          <td style={{ padding: '12px', color: 'white' }}>{(p.fraud_score ?? 0).toFixed(2)}</td>
+                          <td style={{ padding: '12px', color: 'white' }}>{p.risk_level ?? '–'}</td>
+                          <td style={{ padding: '12px', color: p.recommended_action === 'Safe' ? '#a7f3d0' : p.recommended_action === 'Block' ? '#fecaca' : '#fde68a' }}>{p.recommended_action ?? '–'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Risk Assessment & Explainable Grid */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '32px', marginBottom: '32px' }}>
-              {/* Summary Card */}
+              {/* Assessment Card */}
+              <div style={{
+                backgroundColor: 'rgba(236, 72, 153, 0.95)',
+                borderRadius: '20px',
+                padding: '32px',
+                border: `2px solid ${displayLevel === 'High' ? '#f43f5e' : displayLevel === 'Medium' ? '#fbbf24' : '#10b981'}`,
+                boxShadow: '0 20px 50px rgba(0, 0, 0, 0.3)'
+              }}>
+                <h2 style={{ color: 'white', fontSize: '22px', fontWeight: 'bold', marginBottom: '24px' }}>{reportSection2Label}. Risk Assessment</h2>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' }}>
+                  <span style={{ fontSize: '48px' }}>{displayEmoji}</span>
+                  <div>
+                    <p style={{
+                      color: displayLevel === 'High' ? '#fecaca' : displayLevel === 'Medium' ? '#fde68a' : '#d1fae5',
+                      fontSize: '32px',
+                      fontWeight: '900',
+                      margin: 0
+                    }}>{displayLevel} Risk</p>
+                    <p style={{ color: 'white', opacity: 0.9, margin: 0 }}>Model Confidence: {(Number(displayScore) * 100).toFixed(1)}%</p>
+                  </div>
+                </div>
+                <div style={{ background: 'rgba(0, 0, 0, 0.2)', padding: '16px', borderRadius: '12px' }}>
+                  <p style={{ color: 'white', fontSize: '14px', margin: 0 }}>
+                    <strong>Final Recommendation:</strong> <span style={{ color: 'white', fontWeight: 'bold' }}>{displayAction}</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Risk Indicators Card */}
               <div style={{
                 backgroundColor: 'rgba(236, 72, 153, 0.95)',
                 borderRadius: '20px',
@@ -1334,69 +1450,11 @@ const Dashboard = ({ result, setResult, setCurrentPage }) => {
                 border: '1px solid rgba(236, 72, 153, 0.7)',
                 boxShadow: '0 20px 50px rgba(0, 0, 0, 0.3)'
               }}>
-                <h2 style={{ color: 'white', fontSize: '22px', fontWeight: 'bold', marginBottom: '24px' }}>Transaction Summary</h2>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-                  <div>
-                    <label style={{ color: 'white', opacity: 0.8, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px' }}>Amount</label>
-                    <p style={{ color: 'white', fontSize: '20px', fontWeight: '800', margin: '4px 0' }}>{result.amount}</p>
-                  </div>
-                  <div>
-                    <label style={{ color: 'white', opacity: 0.8, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px' }}>Country</label>
-                    <p style={{ color: 'white', fontSize: '20px', fontWeight: '800', margin: '4px 0' }}>{result.country}</p>
-                  </div>
-                  <div>
-                    <label style={{ color: 'white', opacity: 0.8, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px' }}>Category</label>
-                    <p style={{ color: 'white', fontSize: '16px', fontWeight: '600', margin: '4px 0' }}>{result.merchantCategory}</p>
-                  </div>
-                  <div>
-                    <label style={{ color: 'white', opacity: 0.8, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '1px' }}>Time</label>
-                    <p style={{ color: 'white', fontSize: '16px', fontWeight: '600', margin: '4px 0' }}>{result.transactionTime}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Assessment Card */}
-              <div style={{
-                backgroundColor: 'rgba(236, 72, 153, 0.95)',
-                borderRadius: '20px',
-                padding: '32px',
-                border: `2px solid ${result.riskLevel === 'High' ? '#f43f5e' : result.riskLevel === 'Medium' ? '#fbbf24' : '#10b981'}`,
-                boxShadow: '0 20px 50px rgba(0, 0, 0, 0.3)'
-              }}>
-                <h2 style={{ color: 'white', fontSize: '22px', fontWeight: 'bold', marginBottom: '24px' }}>Risk Assessment</h2>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' }}>
-                  <span style={{ fontSize: '48px' }}>{result.riskEmoji}</span>
-                  <div>
-                    <p style={{
-                      color: result.riskLevel === 'High' ? '#fecaca' : result.riskLevel === 'Medium' ? '#fde68a' : '#d1fae5',
-                      fontSize: '32px',
-                      fontWeight: '900',
-                      margin: 0
-                    }}>{result.riskLevel} Risk</p>
-                    <p style={{ color: 'white', opacity: 0.9, margin: 0 }}>Model Confidence: {(result.score * 100).toFixed(1)}%</p>
-                  </div>
-                </div>
-                <div style={{ background: 'rgba(0, 0, 0, 0.2)', padding: '16px', borderRadius: '12px' }}>
-                  <p style={{ color: 'white', fontSize: '14px', margin: 0 }}>
-                    <strong>Final Recommendation:</strong> <span style={{ color: 'white', fontWeight: 'bold' }}>{result.action}</span>
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Risk Indicators Card */}
-            <div style={{
-              backgroundColor: 'rgba(236, 72, 153, 0.95)',
-              borderRadius: '20px',
-              padding: '32px',
-              border: '1px solid rgba(236, 72, 153, 0.7)',
-              boxShadow: '0 20px 50px rgba(0, 0, 0, 0.3)'
-            }}>
-              <h2 style={{ color: 'white', fontSize: '22px', fontWeight: 'bold', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <span style={{ fontSize: '28px' }}>🧠</span> Explainable Risk Indicators
-              </h2>
-              <div style={{ display: 'grid', gap: '16px' }}>
-                {result.reasons.map((reason, idx) => (
+                <h2 style={{ color: 'white', fontSize: '22px', fontWeight: 'bold', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <span style={{ fontSize: '28px' }}>🧠</span> {reportSection3Label}. Explainable Risk Indicators
+                </h2>
+                <div style={{ display: 'grid', gap: '16px' }}>
+                  {(Array.isArray(displayReasons) ? displayReasons : []).map((reason, idx) => (
                   <div key={idx} style={{
                     color: 'white',
                     padding: '16px 20px',
@@ -1448,11 +1506,6 @@ const Dashboard = ({ result, setResult, setCurrentPage }) => {
         @keyframes pulse {
           0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.3; }
           50% { transform: translate(-50%, -50%) scale(1.2); opacity: 0.6; }
-        }
-        
-        @keyframes float {
-          0%, 100% { transform: translateY(0px) scale(1); }
-          50% { transform: translateY(-20px) scale(1.1); }
         }
       `}</style>
     </div>
