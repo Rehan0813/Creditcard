@@ -23,10 +23,9 @@ from auth import verify_password, hash_password, create_access_token, verify_tok
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("backend_debug.log"),
         logging.StreamHandler()
     ]
 )
