@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
+import sys
 import joblib
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
@@ -77,15 +78,24 @@ for col in categorical_features:
     encoders[col] = le
 
 # 4️⃣ Handle Labels (Binary)
-# If the fallback uses 3 classes (0,1,2), we should map it to binary 0/1 for risk score probability if possible,
-# or just train it as is if it's already binary.
-if label_col == "label" and df[label_col].max() > 1:
-    print("🔄 Mapping 3-class label to binary for probability scoring...")
-    # Map 2 (block) to 1, and 0 (safe)/1 (verify) to 0 or keeping verify as 1?
-    # Actually, if we want a probability of fraud, both verify and block should be seen as "risky"
-    df["target"] = df[label_col].apply(lambda x: 1 if x > 0 else 0)
+if label_col in df.columns:
+    # Handle string labels
+    if df[label_col].dtype == object or df[label_col].dtype == str:
+        print(f"🔄 Mapping string labels to numeric...")
+        label_map = {"safe": 0, "verify": 1, "block": 2, "fraud": 1, "legit": 0}
+        df["target_num"] = df[label_col].str.lower().map(label_map).fillna(0).astype(int)
+    else:
+        df["target_num"] = df[label_col].astype(int)
+    
+    # Map to binary (0=safe, 1=risky) for probability training
+    if df["target_num"].max() > 1:
+        print("🔄 Mapping 3-class label to binary for probability scoring...")
+        df["target"] = df["target_num"].apply(lambda x: 1 if x > 0 else 0)
+    else:
+        df["target"] = df["target_num"]
 else:
-    df["target"] = df[label_col].astype(int)
+    print(f"❌ Label column '{label_col}' not found!")
+    sys.exit(1)
 
 # 5️⃣ Data Split
 features = [

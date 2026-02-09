@@ -395,13 +395,6 @@ def get_file_transactions(
 # Prediction endpoint
 def get_risk_metadata(fraud_score: float, is_fallback: bool = False):
     """Generate risk level, action, and reasons based on fraud score"""
-    if is_fallback:
-        return {
-            "risk_level": "Medium",
-            "recommended_action": "Verify",
-            "reasons": ["Fallback prediction (model version mismatch). Re-train and save the pipeline with this backend's scikit-learn version, or predictions will use this fallback."]
-        }
-    
     if fraud_score < 0.3:
         return {
             "risk_level": "Low",
@@ -413,23 +406,27 @@ def get_risk_metadata(fraud_score: float, is_fallback: bool = False):
             ]
         }
     elif fraud_score < 0.7:
+        reasons = [
+            "Transaction amount higher than average but within reasonable limits",
+            "Geographic location differs from usual purchasing areas",
+            "Payment method used is valid but requires additional verification"
+        ]
+        if is_fallback:
+            reasons.append("Model is currently using a fallback assessment.")
+            
         return {
             "risk_level": "Medium",
             "recommended_action": "Verify",
-            "reasons": [
-                "Transaction amount higher than average but within reasonable limits",
-                "Geographic location differs from usual purchasing areas",
-                "Payment method used is valid but timing is outside normal business hours"
-            ]
+            "reasons": reasons
         }
     else:
         return {
             "risk_level": "High",
             "recommended_action": "Block",
             "reasons": [
-                "Transaction amount significantly exceeds typical spending patterns",
-                "Merchant category known for high chargeback rates",
-                "Multiple velocity rule violations detected"
+                "Transaction matches known high-risk fraud patterns",
+                "Multiple risk indicators detected (velocity, location mismatch)",
+                "Immediate intervention recommended to prevent potential loss"
             ]
         }
 
@@ -439,9 +436,10 @@ def calculate_prediction(data: dict):
     """
     # Normalize keys: lowercase, strip, spaces -> underscores
     data_norm = {str(k).strip().lower().replace(" ", "_"): v for k, v in data.items()}
+    logger.info(f"DEBUG: calculate_prediction input: {data_norm}")
 
     if not MODEL_LOADED or model is None or encoders is None:
-        logger.debug(f"Falling back to 0.5 score. MODEL_LOADED={MODEL_LOADED}")
+        logger.warning(f"Fallback to 0.5: Model or Encoders not loaded. MODEL_LOADED={MODEL_LOADED}")
         metadata = get_risk_metadata(0.5, is_fallback=True)
         return {
             "fraud_score": 0.5,
@@ -482,7 +480,14 @@ def calculate_prediction(data: dict):
         high_velocity = 1 if transaction_count_24h > 3 else 0
         
         # is_international often provided as separate field or derived
-        is_international = int(data_norm.get("is_international", country_mismatch))
+        is_international_raw = data_norm.get("is_international")
+        if is_international_raw is None or is_international_raw == "":
+            is_international = int(country_mismatch)
+        else:
+            try:
+                is_international = int(float(is_international_raw))
+            except:
+                is_international = int(country_mismatch)
 
         # --- 3. Categorical Encoding ---
         cat_cols = ["merchant_category", "country", "device_type", "payment_method"]
@@ -492,11 +497,18 @@ def calculate_prediction(data: dict):
             val = str(data_norm.get(col, "UNKNOWN")).strip()
             if le:
                 classes = list(le.classes_)
-                # Use "UNKNOWN" if available in classes, else fallback to first class
-                if val in classes:
-                    encoded_cats[col] = int(le.transform([val])[0])
+                # Match case-insensitively if possible, else fallback
+                classes_lower = [str(c).lower() for c in classes]
+                val_lower = val.lower()
+                
+                if val_lower in classes_lower:
+                    idx = classes_lower.index(val_lower)
+                    encoded_cats[col] = int(le.transform([classes[idx]])[0])
                 elif "UNKNOWN" in classes:
                     encoded_cats[col] = int(le.transform(["UNKNOWN"])[0])
+                elif "unknown" in classes_lower:
+                    idx = classes_lower.index("unknown")
+                    encoded_cats[col] = int(le.transform([classes[idx]])[0])
                 else:
                     encoded_cats[col] = int(le.transform([classes[0]])[0])
             else:

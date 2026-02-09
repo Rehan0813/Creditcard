@@ -312,14 +312,7 @@ const Dashboard = ({ result, setResult, setCurrentPage }) => {
       }
     };
 
-    const csvContent = [
-      "# Fraud Detection Schema Requirements",
-      "# Required Fields: amount, transaction_time, merchant_category, country, device_type, payment_method",
-      "# Optional Fields: channel, merchant_country, transaction_count_24h, avg_amount_24h",
-      "",
-      Object.keys(schema.example_format).join(','),
-      Object.values(schema.example_format).join(',')
-    ].join('\n');
+    const csvContent = Object.keys(schema.example_format).join(',');
 
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
