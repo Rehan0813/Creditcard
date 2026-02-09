@@ -5,6 +5,8 @@ import ModelEvaluation from './components/ModelEvaluation';
 import FeedbackPage from './components/FeedbackPage';
 import AnalysisReportPage from './components/AnalysisReportPage';
 import VantaNetLayout from './components/VantaNetLayout';
+import ManualFormPage from './components/ManualFormPage';
+import ReportPage from './components/ReportPage';
 import { fraudApi } from './api/fraudApi';
 
 function App() {
@@ -212,7 +214,11 @@ function App() {
     const renderPage = () => {
       if (currentPage === 'howtouse') return <HowToUse />;
       if (currentPage === 'modelevaluation') return <ModelEvaluation />;
+      if (currentPage === 'manualform') {
+        return <ManualFormPage setCurrentPage={setCurrentPage} setResult={setResult} />;
+      }
       if (currentPage === 'feedback') return <FeedbackPage result={result} setCurrentPage={setCurrentPage} />;
+      if (currentPage === 'report') return <ReportPage result={result} setCurrentPage={setCurrentPage} />;
       if (currentPage === 'analysisreport') return <AnalysisReportPage result={result} setResult={setResult} setCurrentPage={setCurrentPage} />;
       return <Dashboard result={result} setResult={setResult} setCurrentPage={setCurrentPage} />;
     };

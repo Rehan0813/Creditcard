@@ -436,7 +436,7 @@ const Dashboard = ({ result, setResult, setCurrentPage }) => {
   return (
     <div style={{
       position: 'relative',
-      padding: '20px 20px 160px 20px',
+      padding: '20px 20px 400px 20px',
       minHeight: '100%',
       width: '100%',
       boxSizing: 'border-box',
@@ -837,6 +837,34 @@ const Dashboard = ({ result, setResult, setCurrentPage }) => {
               }}
             >
               📊 Upload XLSX
+            </button>
+            <button
+              onClick={() => setCurrentPage && setCurrentPage('manualform')}
+              style={{
+                display: 'inline-block',
+                padding: '14px 32px',
+                background: 'linear-gradient(135deg, #ef4444, #b91c1c)',
+                color: 'white',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                fontSize: '15px',
+                fontWeight: '600',
+                transition: 'all 0.3s ease',
+                border: '2px solid rgba(248, 113, 113, 0.5)',
+                boxShadow: '0 6px 20px rgba(248, 113, 113, 0.6), 0 0 40px rgba(248, 113, 113, 0.3)',
+                position: 'relative',
+                overflow: 'hidden'
+              }}
+              onMouseOver={(e) => {
+                e.target.style.transform = 'translateY(-2px) scale(1.02)';
+                e.target.style.boxShadow = '0 8px 30px rgba(248, 113, 113, 0.8), 0 0 60px rgba(248, 113, 113, 0.4)';
+              }}
+              onMouseOut={(e) => {
+                e.target.style.transform = 'translateY(0) scale(1)';
+                e.target.style.boxShadow = '0 6px 20px rgba(248, 113, 113, 0.6), 0 0 40px rgba(248, 113, 113, 0.3)';
+              }}
+            >
+              ✍️ Fill Transaction Form
             </button>
           </div>
 

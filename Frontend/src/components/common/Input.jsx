@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 const Input = ({
   label,
@@ -11,63 +11,131 @@ const Input = ({
   disabled = false,
   className = '',
   options = [],
+  helperText = '',
   ...props
 }) => {
-  const baseStyles = 'w-full px-4 py-3 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#3b9eff] focus:border-transparent focus:shadow-[0_0_20px_rgba(59,158,255,0.3)] transition-all duration-200';
-  const errorStyles = error ? 'border-[#f87171] focus:ring-[#f87171] focus:shadow-[0_0_20px_rgba(248,113,113,0.3)]' : '';
-  const disabledStyles = disabled ? 'opacity-50 cursor-not-allowed' : '';
+  const [isFocused, setIsFocused] = useState(false);
 
-  const inputStyles = `${baseStyles} ${errorStyles} ${disabledStyles} ${className}`;
+  // Robust inline styles to ensure visibility regardless of Tailwind
+  const containerStyle = {
+    marginBottom: '16px',
+    width: '100%'
+  };
+
+  const labelStyle = {
+    display: 'block',
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#e5e7eb', // gray-200
+    marginBottom: '8px'
+  };
+
+  const inputBaseStyle = {
+    width: '100%',
+    padding: '12px 16px',
+    borderRadius: '12px',
+    backgroundColor: 'rgba(31, 41, 55, 0.8)', // gray-800 with opacity
+    border: error ? '1px solid #ef4444' : (isFocused ? '1px solid #ef4444' : '1px solid rgba(75, 85, 99, 0.5)'),
+    color: 'white',
+    fontSize: '15px',
+    outline: 'none',
+    transition: 'all 0.3s ease',
+    boxSizing: 'border-box',
+    boxShadow: isFocused ? '0 0 0 2px rgba(239, 68, 68, 0.2)' : '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+  };
+
+  const selectStyle = {
+    ...inputBaseStyle,
+    appearance: 'none', // Remove default arrow
+    cursor: 'pointer',
+    backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%239ca3af' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`,
+    backgroundPosition: 'right 0.5rem center',
+    backgroundRepeat: 'no-repeat',
+    backgroundSize: '1.5em 1.5em',
+    paddingRight: '2.5rem'
+  };
 
   if (type === 'select') {
     return (
-      <div className="space-y-2">
+      <div style={containerStyle}>
         {label && (
-          <label className="block text-sm font-medium text-gray-300">
+          <label style={labelStyle}>
             {label}
-            {required && <span className="text-red-400 ml-1">*</span>}
+            {required && <span style={{ color: '#f87171', marginLeft: '4px' }}>*</span>}
           </label>
         )}
-        <select
-          value={value}
-          onChange={onChange}
-          disabled={disabled}
-          className={inputStyles}
-          {...props}
-        >
-          <option value="">{placeholder || 'Select an option'}</option>
-          {options.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        <div style={{ position: 'relative' }}>
+          <select
+            value={value}
+            onChange={onChange}
+            disabled={disabled}
+            style={{
+              ...selectStyle,
+              opacity: disabled ? 0.6 : 1,
+              cursor: disabled ? 'not-allowed' : 'pointer'
+            }}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
+            {...props}
+          >
+            <option value="" style={{ backgroundColor: '#1f2937' }}>{placeholder || 'Select an option'}</option>
+            {options.map((option) => (
+              <option key={option.value} value={option.value} style={{ backgroundColor: '#1f2937' }}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        {helperText && !error && (
+          <p style={{ color: '#9ca3af', fontSize: '12px', marginTop: '6px' }}>
+            {helperText}
+          </p>
+        )}
         {error && (
-          <p className="text-red-400 text-sm mt-1">{error}</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
+            <span style={{ color: '#f87171', fontSize: '14px' }}>⚠️</span>
+            <p style={{ color: '#f87171', fontSize: '13px', fontWeight: '500' }}>{error}</p>
+          </div>
         )}
       </div>
     );
   }
 
   return (
-    <div className="space-y-2">
+    <div style={containerStyle}>
       {label && (
-        <label className="block text-sm font-medium text-gray-300">
+        <label style={labelStyle}>
           {label}
-          {required && <span className="text-red-400 ml-1">*</span>}
+          {required && <span style={{ color: '#f87171', marginLeft: '4px' }}>*</span>}
         </label>
       )}
-      <input
-        type={type}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-        disabled={disabled}
-        className={inputStyles}
-        {...props}
-      />
+      <div style={{ position: 'relative' }}>
+        <input
+          type={type}
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder}
+          disabled={disabled}
+          style={{
+            ...inputBaseStyle,
+            opacity: disabled ? 0.6 : 1,
+            cursor: disabled ? 'not-allowed' : 'text'
+          }}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+          {...props}
+        />
+      </div>
+      {helperText && !error && (
+        <p style={{ color: '#9ca3af', fontSize: '12px', marginTop: '6px' }}>
+          {helperText}
+        </p>
+      )}
       {error && (
-        <p className="text-red-400 text-sm mt-1">{error}</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
+          <span style={{ color: '#f87171', fontSize: '14px' }}>⚠️</span>
+          <p style={{ color: '#f87171', fontSize: '13px', fontWeight: '500' }}>{error}</p>
+        </div>
       )}
     </div>
   );

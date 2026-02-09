@@ -15,10 +15,22 @@ import xgboost as xgb
 import sklearn
 from sklearn.pipeline import Pipeline
 import joblib
+import logging
 
 from database import SessionLocal, engine, Base
 from models import User, UploadedFile, Prediction, Feedback
 from auth import verify_password, hash_password, create_access_token, verify_token
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("backend_debug.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -123,6 +135,7 @@ class PredictionRequest(BaseModel):
     merchant_country: Optional[str] = None
     transaction_count_24h: Optional[int] = None
     avg_amount_24h: Optional[float] = None
+    is_international: Optional[int] = None
 
 class PredictionResponse(BaseModel):
     prediction_id: int
@@ -149,155 +162,43 @@ class FeedbackResponse(BaseModel):
     feedback_id: int
     message: str
 
-# Load ML model
-import os
+#
+# Load ML model from new `fraud-model` package
+#
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Use absolute paths relative to BASE_DIR
-MODEL_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "Credit Card Fraud Mlops", "Credit Card Fraud Mlops", "Model", "xgb_fraud_pipeline.pkl"))
-THRESHOLD_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "Credit Card Fraud Mlops", "Credit Card Fraud Mlops", "Model", "fraud_threshold.pkl"))
+FRAUD_MODEL_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "fraud-model", "model"))
+FRAUD_MODEL_PATH = os.path.join(FRAUD_MODEL_DIR, "fraud_model.pkl")
+ENCODERS_PATH = os.path.join(FRAUD_MODEL_DIR, "encoders.pkl")
 
 MODEL_LOADED = False
 model = None
-threshold_data = None
+encoders = None
+feature_names = None
 
 try:
-    if os.path.exists(MODEL_PATH):
-        # Try joblib first, then fallback to pickle
-        try:
-            model = joblib.load(MODEL_PATH)
-            print(f"[OK] Model loaded successfully via joblib from {MODEL_PATH}")
-        except Exception as joblib_e:
-            print(f"[INFO] Joblib load failed: {joblib_e}. Trying pickle...")
-            with open(MODEL_PATH, 'rb') as f:
-                model = pickle.load(f)
-            print(f"[OK] Model loaded successfully via pickle from {MODEL_PATH}")
+    if os.path.exists(FRAUD_MODEL_PATH) and os.path.exists(ENCODERS_PATH):
+        model = joblib.load(FRAUD_MODEL_PATH)
+        encoders = joblib.load(ENCODERS_PATH)
+        
+        # Load feature names if available to ensure order consistency
+        FEATURE_NAMES_PATH = os.path.join(FRAUD_MODEL_DIR, "feature_names.pkl")
+        if os.path.exists(FEATURE_NAMES_PATH):
+            feature_names = joblib.load(FEATURE_NAMES_PATH)
             
-        if os.path.exists(THRESHOLD_PATH):
-            try:
-                threshold_data = joblib.load(THRESHOLD_PATH)
-            except:
-                with open(THRESHOLD_PATH, 'rb') as f:
-                    threshold_data = pickle.load(f)
         MODEL_LOADED = True
+        print(f"[OK] fraud-model loaded from {FRAUD_MODEL_PATH}")
+        if feature_names:
+            print(f"[INFO] Using feature names: {feature_names}")
     else:
-        print(f"[WARNING] Model file not found at {MODEL_PATH}")
+        print(f"[WARNING] fraud-model assets not found at {FRAUD_MODEL_PATH} / {ENCODERS_PATH}")
 except Exception as e:
     import traceback
-    print(f"[WARNING] Could not load model: {e}")
+    print(f"[WARNING] Could not load fraud-model: {e}")
     traceback.print_exc()
-    print(f"[INFO] API will work with fallback predictions")
+    print("[INFO] API will work with fallback predictions")
     MODEL_LOADED = False
     model = None
-    threshold_data = None
-
-# Inference features
-MODEL_FEATURES = [
-    'amount', 'transaction_time', 'merchant_category', 'country',
-    'device_type', 'payment_method', 'channel', 'merchant_country',
-    'transaction_count_24h', 'avg_amount_24h'
-]
-CATEGORICAL_FEATURES = ['merchant_category', 'country', 'device_type', 'channel', 'payment_method', 'merchant_country']
-NUMERICAL_FEATURES = ['amount', 'transaction_count_24h', 'avg_amount_24h']
-
-
-def _schema_to_model_df(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Convert schema columns (amount, transaction_time, merchant_category, country,
-    device_type, payment_method, channel?, merchant_country?, transaction_count_24h?, avg_amount_24h?)
-    into the DataFrame columns expected by the fraud pipeline (same feature engineering as notebooks).
-    """
-    df = df.copy()
-    df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
-    # Ensure optional columns exist with defaults
-    if "channel" not in df.columns:
-        df["channel"] = "web"
-    if "merchant_country" not in df.columns:
-        df["merchant_country"] = df["country"].astype(str) if "country" in df.columns else "US"
-    if "transaction_count_24h" not in df.columns:
-        df["transaction_count_24h"] = 0
-    if "avg_amount_24h" not in df.columns:
-        df["avg_amount_24h"] = 0.0
-    if "currency" not in df.columns:
-        df["currency"] = "USD"
-    if "merchant_id" not in df.columns:
-        df["merchant_id"] = 0
-
-    # Coerce numeric
-    df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
-    df["transaction_count_24h"] = pd.to_numeric(df["transaction_count_24h"], errors="coerce").fillna(0).astype(int)
-    df["avg_amount_24h"] = pd.to_numeric(df["avg_amount_24h"], errors="coerce").fillna(0.0)
-    df["merchant_id"] = pd.to_numeric(df["merchant_id"], errors="coerce").fillna(0).astype(int)
-
-    # Parse time
-    df["transaction_time"] = pd.to_datetime(df["transaction_time"], dayfirst=True, errors="coerce")
-    df["transaction_time"] = df["transaction_time"].fillna(pd.Timestamp.utcnow())
-    df["hour"] = df["transaction_time"].dt.hour
-    df["day_of_week"] = df["transaction_time"].dt.dayofweek
-    df["is_weekend"] = df["day_of_week"].isin([5, 6]).astype(int)
-    df["is_night"] = df["hour"].between(0, 5).astype(int)
-
-    # Engineered numeric features (match testing_model.ipynb / 03_feature_engineering_pipeline.ipynb)
-    df["log_amount"] = np.log1p(df["amount"])
-    df["high_amount"] = (df["amount"] > 300).astype(int)
-    df["country_mismatch"] = (df["country"].astype(str) != df["merchant_country"].astype(str)).astype(int)
-    df["high_velocity"] = (df["transaction_count_24h"] > 3).astype(int)
-    risky_categories = ["electronics", "gaming"]
-    df["risky_merchant"] = df["merchant_category"].astype(str).str.lower().isin(risky_categories).astype(int)
-    df["is_international"] = (df["country"].astype(str) != df["merchant_country"].astype(str)).astype(int)
-
-    # Ensure categorical columns are string for pipeline
-    for col in ["currency", "merchant_category", "merchant_country", "country", "device_type", "channel", "payment_method"]:
-        if col in df.columns:
-            df[col] = df[col].astype(str).fillna("")
-
-    return df
-
-
-def _get_pipeline_input_columns(pipe):
-    """Get the set of column names the pipeline's first step (preprocessor) expects, if available."""
-    try:
-        first_step = pipe.steps[0][1]
-        cols = set()
-        if hasattr(first_step, "transformers_"):
-            for _name, _trans, col_list in first_step.transformers_:
-                if hasattr(col_list, "__iter__") and not isinstance(col_list, str):
-                    cols.update(col_list)
-                else:
-                    cols.add(col_list)
-        elif hasattr(first_step, "feature_names_in_"):
-            cols.update(first_step.feature_names_in_)
-        return list(cols) if cols else None
-    except Exception:
-        return None
-
-
-# Exact columns the saved xgb_fraud_pipeline expects (from 03_feature_engineering_pipeline.ipynb)
-# num: amount, log_amount, transaction_count_24h, avg_amount_24h, hour, day_of_week, is_weekend, is_international, country_mismatch, high_amount, is_night, high_velocity, risky_merchant
-# cat: currency, merchant_id, merchant_category, merchant_country, country, device_type, channel, payment_method
-PIPELINE_INPUT_COLUMNS = [
-    "amount", "log_amount", "transaction_count_24h", "avg_amount_24h",
-    "hour", "day_of_week", "is_weekend", "is_international", "country_mismatch",
-    "high_amount", "is_night", "high_velocity", "risky_merchant",
-    "currency", "merchant_id", "merchant_category", "merchant_country",
-    "country", "device_type", "channel", "payment_method",
-]
-_CAT_COLUMNS = {"currency", "merchant_category", "merchant_country", "country", "device_type", "channel", "payment_method"}
-
-
-def _build_pipeline_input_df(engineered_df: pd.DataFrame) -> pd.DataFrame:
-    """Build a one-row DataFrame with exactly PIPELINE_INPUT_COLUMNS for model.predict_proba."""
-    row = {}
-    for c in PIPELINE_INPUT_COLUMNS:
-        if c in engineered_df.columns:
-            val = engineered_df[c].iloc[0]
-            if pd.isna(val) and c in _CAT_COLUMNS:
-                val = ""
-            elif pd.isna(val):
-                val = 0
-            row[c] = val
-        else:
-            row[c] = "" if c in _CAT_COLUMNS else (0 if c == "merchant_id" else 0)
-    return pd.DataFrame([row], columns=PIPELINE_INPUT_COLUMNS)
+    encoders = None
 
 
 # Authentication endpoints
@@ -535,49 +436,145 @@ def get_risk_metadata(fraud_score: float, is_fallback: bool = False):
 
 def calculate_prediction(data: dict):
     """
-    Core prediction logic: maps input data to model format and returns results.
+    Core prediction logic: replicates feature engineering from train.py.
     """
     # Normalize keys: lowercase, strip, spaces -> underscores
     data_norm = {str(k).strip().lower().replace(" ", "_"): v for k, v in data.items()}
-    
-    if not MODEL_LOADED:
+
+    if not MODEL_LOADED or model is None or encoders is None:
+        logger.debug(f"Falling back to 0.5 score. MODEL_LOADED={MODEL_LOADED}")
         metadata = get_risk_metadata(0.5, is_fallback=True)
         return {
             "fraud_score": 0.5,
-            **metadata
+            **metadata,
         }
 
     try:
-        # Prepare row with all required features (use defaults for missing)
-        row = {}
-        for k in MODEL_FEATURES:
-            v = data_norm.get(k)
-            # handle NaNs or empty strings or None
-            if v is None or (isinstance(v, float) and np.isnan(v)) or str(v).strip() == "":
-                if k in CATEGORICAL_FEATURES: v = 'Unknown'
-                elif k in NUMERICAL_FEATURES: 
-                    v = 0 if k in ('transaction_count_24h', 'avg_amount_24h') else 0.0
-            row[k] = v
+        # --- 1. Basic Features ---
+        amount = float(data_norm.get("amount", 0.0) or 0.0)
+        ts_raw = data_norm.get("transaction_time", "")
+        try:
+            ts = pd.to_datetime(ts_raw, dayfirst=True, errors='coerce')
+            if pd.isna(ts):
+                ts = pd.Timestamp.utcnow()
+        except:
+            ts = pd.Timestamp.utcnow()
         
-        df = pd.DataFrame([row])
-        df = _schema_to_model_df(df)
-        # Build pipeline input with exactly the columns the saved model expects
-        pipeline_df = _build_pipeline_input_df(df)
-        fraud_score = float(model.predict_proba(pipeline_df)[0][1])
+        hour = int(ts.hour)
+        day_of_week = int(ts.dayofweek)
+        is_weekend = 1 if day_of_week in [5, 6] else 0
+        is_night = 1 if (hour < 6 or hour > 22) else 0
         
-        metadata = get_risk_metadata(fraud_score)
+        # --- 2. Advanced Features ---
+        log_amount = np.log1p(amount)
         
-        return {
-            "fraud_score": float(fraud_score),
-            **metadata
+        country = str(data_norm.get("country", "")).strip().upper()
+        merchant_country = str(data_norm.get("merchant_country", "")).strip().upper()
+        
+        if merchant_country and country:
+            country_mismatch = 1 if country != merchant_country else 0
+        else:
+            country_mismatch = 0
+            
+        avg_amount_24h = float(data_norm.get("avg_amount_24h", 0.0) or 0.0)
+        amount_vs_avg = amount / (avg_amount_24h + 1)
+        
+        transaction_count_24h = int(data_norm.get("transaction_count_24h", 0) or 0)
+        high_velocity = 1 if transaction_count_24h > 3 else 0
+        
+        # is_international often provided as separate field or derived
+        is_international = int(data_norm.get("is_international", country_mismatch))
+
+        # --- 3. Categorical Encoding ---
+        cat_cols = ["merchant_category", "country", "device_type", "payment_method"]
+        encoded_cats = {}
+        for col in cat_cols:
+            le = encoders.get(col)
+            val = str(data_norm.get(col, "UNKNOWN")).strip()
+            if le:
+                classes = list(le.classes_)
+                # Use "UNKNOWN" if available in classes, else fallback to first class
+                if val in classes:
+                    encoded_cats[col] = int(le.transform([val])[0])
+                elif "UNKNOWN" in classes:
+                    encoded_cats[col] = int(le.transform(["UNKNOWN"])[0])
+                else:
+                    encoded_cats[col] = int(le.transform([classes[0]])[0])
+            else:
+                encoded_cats[col] = 0
+
+        # --- 4. Construct Row ---
+        row = {
+            "amount": amount,
+            "log_amount": log_amount,
+            "hour": hour,
+            "day_of_week": day_of_week,
+            "is_weekend": is_weekend,
+            "is_night": is_night,
+            "country_mismatch": country_mismatch,
+            "amount_vs_avg": amount_vs_avg,
+            "high_velocity": high_velocity,
+            "is_international": is_international,
+            **encoded_cats
         }
+
+        # Use the explicit feature names if loaded to ensure order
+        if feature_names:
+            X = pd.DataFrame([row])[feature_names]
+        else:
+            # Fallback to a hardcoded order if feature_names not found
+            cols = [
+                "amount", "log_amount", "hour", "day_of_week", "is_weekend", "is_night",
+                "country_mismatch", "amount_vs_avg", "high_velocity",
+                "merchant_category", "country", "device_type", "payment_method", "is_international"
+            ]
+            # filter to what's in row
+            cols = [c for c in cols if c in row]
+            X = pd.DataFrame([row])[cols]
+
+        # --- 5. Predict Probability ---
+        # Binary model: predict_proba returns [prob_legit, prob_fraud]
+        proba = model.predict_proba(X)[0]
+        fraud_prob = float(proba[1])
+        
+        logger.info(f"Prediction: prob={fraud_prob:.4f} for features={row}")
+
+        # Map probability to risk levels
+        if fraud_prob < 0.3:
+            level = "Low"
+            action = "Safe"
+        elif fraud_prob < 0.7:
+            level = "Medium"
+            action = "Verify"
+        else:
+            level = "High"
+            action = "Block"
+
+        metadata = get_risk_metadata(fraud_prob)
+        metadata["risk_level"] = level
+        metadata["recommended_action"] = action
+
+        return {
+            "fraud_score": fraud_prob,
+            **metadata,
+        }
+
     except Exception as e:
-        # Model may be from different sklearn version
-        print(f"[INFO] Using fallback prediction (model error: {e})")
+        logger.error(f"Prediction failed: {str(e)}", exc_info=True)
         metadata = get_risk_metadata(0.5, is_fallback=True)
         return {
             "fraud_score": 0.5,
-            **metadata
+            **metadata,
+        }
+    except Exception as e:
+        import traceback
+        logger.error(f"[ERROR] Prediction failed: {e}")
+        traceback.print_exc()
+        logger.info(f"[INFO] Using fallback prediction (model error: {e})")
+        metadata = get_risk_metadata(0.5, is_fallback=True)
+        return {
+            "fraud_score": 0.5,
+            **metadata,
         }
 
 @app.post("/api/predict", response_model=PredictionResponse)
@@ -830,3 +827,4 @@ if __name__ == "__main__":
     else:
         print(f"[Backend] Local test: http://127.0.0.1:{port}/api/health  |  Frontend: http://localhost:3003")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=not is_production)
+

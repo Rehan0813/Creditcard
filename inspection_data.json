@@ -1,0 +1,72 @@
+{
+    "columns": [
+        "amount",
+        "transaction_time",
+        "merchant_category",
+        "country",
+        "device_type",
+        "payment_method",
+        "label"
+    ],
+    "head": [
+        {
+            "amount": 24794,
+            "transaction_time": "2024-09-23 10:46:00",
+            "merchant_category": "services",
+            "country": "usa",
+            "device_type": "tablet",
+            "payment_method": "upi",
+            "label": "verify"
+        },
+        {
+            "amount": 14926,
+            "transaction_time": "2024-08-17 13:48:00",
+            "merchant_category": "fashion",
+            "country": "uk",
+            "device_type": "tablet",
+            "payment_method": "debit_card",
+            "label": "verify"
+        },
+        {
+            "amount": 22008,
+            "transaction_time": "2024-06-05 18:34:00",
+            "merchant_category": "services",
+            "country": "india",
+            "device_type": "mobile",
+            "payment_method": "credit_card",
+            "label": "verify"
+        },
+        {
+            "amount": 22855,
+            "transaction_time": "2024-01-02 23:33:00",
+            "merchant_category": "food",
+            "country": "uk",
+            "device_type": "desktop",
+            "payment_method": "upi",
+            "label": "safe"
+        },
+        {
+            "amount": 10865,
+            "transaction_time": "2024-02-24 10:53:00",
+            "merchant_category": "grocery",
+            "country": "uae",
+            "device_type": "mobile",
+            "payment_method": "debit_card",
+            "label": "verify"
+        }
+    ],
+    "value_counts": {
+        "label": {
+            "safe": 25021,
+            "verify": 18942,
+            "block": 6037
+        },
+        "country": {
+            "india": 10099,
+            "uk": 10052,
+            "usa": 10008,
+            "uae": 9949,
+            "germany": 9892
+        }
+    }
+}

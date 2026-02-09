@@ -253,6 +253,24 @@ const FeedbackPage = ({ result, setCurrentPage }) => {
           }}
         >Cancel</button>
         <button
+          onClick={() => setCurrentPage('report')}
+          style={{
+            padding: '12px 24px',
+            background: 'rgba(239, 68, 68, 0.2)',
+            border: '2px solid rgba(239, 68, 68, 0.5)',
+            borderRadius: '8px',
+            color: '#f87171',
+            fontSize: '14px',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+        >
+          🚨 Report to Authorities
+        </button>
+        <button
           onClick={async () => {
             // Validation
             if (!feedbackData.humanDecision) {

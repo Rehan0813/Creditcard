@@ -50,7 +50,7 @@ const ModelEvaluation = () => {
   return (
     <div style={{
       position: 'relative',
-      padding: '20px',
+      padding: '20px 20px 150px 20px',
       minHeight: '100%',
       width: '100%',
       boxSizing: 'border-box'

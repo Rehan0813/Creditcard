@@ -9,8 +9,9 @@ except ImportError:
     joblib = None
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_DIR = os.path.join(BASE_DIR, "..", "Credit Card Fraud Mlops", "Credit Card Fraud Mlops", "Model")
-MODEL_PATH = os.path.join(MODEL_DIR, "xgb_fraud_pipeline.pkl")
+MODEL_DIR = os.path.join(BASE_DIR, "..", "fraud-model", "model")
+MODEL_PATH = os.path.join(MODEL_DIR, "fraud_model.pkl")
+ENCODERS_PATH = os.path.join(MODEL_DIR, "encoders.pkl")
 
 print(f"Python version: {os.sys.version}")
 print(f"Pandas version: {pd.__version__}")
@@ -20,6 +21,7 @@ if joblib:
     print(f"Joblib version: {joblib.__version__}")
 
 print(f"\nAttempting to load model from: {MODEL_PATH}")
+print(f"Attempting to load encoders from: {ENCODERS_PATH}")
 
 if not os.path.exists(MODEL_PATH):
     print("Error: Model file not found!")
@@ -44,8 +46,17 @@ else:
         except Exception as e:
             print(f"Joblib failed: {e}")
 
+    # 2b. Load encoders (required for inference)
+    if joblib and os.path.exists(ENCODERS_PATH):
+        try:
+            encoders = joblib.load(ENCODERS_PATH)
+            print("SUCCESS! Encoders loaded with joblib.")
+            print(f"Encoders keys: {list(encoders.keys())}")
+        except Exception as e:
+            print(f"Encoders load failed: {e}")
+
     # 3. Try to inspect the file content if both fail
-    if not'model' in locals():
+    if not 'model' in locals():
         print("\nBoth methods failed. Trying to read first few bytes...")
         with open(MODEL_PATH, 'rb') as f:
             header = f.read(100)
