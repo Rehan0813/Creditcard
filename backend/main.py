@@ -119,6 +119,12 @@ class LoginRequest(BaseModel):
     phone: Optional[str] = None
     password: str
 
+class ResetPasswordRequest(BaseModel):
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    name: str
+    new_password: str
+
 class AuthResponse(BaseModel):
     access_token: str
     token_type: str
@@ -301,6 +307,28 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
             "phone": user.phone
         }
     )
+@app.post("/api/auth/reset-password")
+def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Reset password by validating email/phone and name"""
+    if not request.email and not request.phone:
+        raise HTTPException(status_code=400, detail="Either email or phone number is required")
+    # Find user by email or phone and name
+    user = None
+    if request.email:
+        user = db.query(User).filter(User.email == request.email, User.name == request.name).first()
+    if request.phone:
+        user = db.query(User).filter(User.phone == request.phone, User.name == request.name).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found with the provided information. Please verify your details.")
+    try:
+        # Update password
+        user.password = hash_password(request.new_password)
+        db.commit()
+        return {"message": "Password reset successful. You can now login with your new password."}
+    except Exception as e:
+        db.rollback()
+        print(f"[ERROR] reset_password: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # File upload endpoint
 @app.post("/api/files/upload")
