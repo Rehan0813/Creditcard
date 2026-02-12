@@ -291,12 +291,6 @@ const Dashboard = ({ result, setResult, setCurrentPage }) => {
         "device_type",
         "payment_method"
       ],
-      optional_fields: [
-        "channel",
-        "merchant_country",
-        "transaction_count_24h",
-        "avg_amount_24h"
-      ],
       description: "Upload your CSV/Excel file with these columns for accurate fraud detection",
       example_format: {
         amount: "125.50",
@@ -304,11 +298,7 @@ const Dashboard = ({ result, setResult, setCurrentPage }) => {
         merchant_category: "electronics",
         country: "US",
         device_type: "mobile",
-        payment_method: "credit_card",
-        channel: "online",
-        merchant_country: "US",
-        transaction_count_24h: 3,
-        avg_amount_24h: 89.75
+        payment_method: "credit_card"
       }
     };
 
@@ -1049,10 +1039,10 @@ const Dashboard = ({ result, setResult, setCurrentPage }) => {
         </div>
       </div>
 
-      {/* Schema Download - Bottom Right */}
+      {/* Schema Download - Top Right */}
       <div style={{
         position: 'fixed',
-        bottom: '20px',
+        top: '370px',
         right: '20px',
         zIndex: 20,
         background: 'rgba(30, 41, 59, 0.9)',
@@ -1103,34 +1093,7 @@ const Dashboard = ({ result, setResult, setCurrentPage }) => {
           </div>
         </div>
 
-        <div style={{
-          marginBottom: '14px'
-        }}>
-          <div style={{
-            color: '#9ca3af',
-            fontSize: '12px',
-            marginBottom: '8px',
-            fontWeight: '600'
-          }}>Optional Fields:</div>
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '3px'
-          }}>
-            {['channel', 'merchant_country', 'transaction_count_24h', 'avg_amount_24h'].map((field, index) => (
-              <div key={index} style={{
-                color: '#f59e0b',
-                fontSize: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px'
-              }}>
-                <span style={{ fontSize: '8px' }}>○</span>
-                {field}
-              </div>
-            ))}
-          </div>
-        </div>
+
 
         <button
           onClick={downloadSchema}
