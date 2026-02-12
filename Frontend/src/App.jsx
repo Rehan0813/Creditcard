@@ -16,6 +16,7 @@ function App() {
   const [result, setResult] = useState(null); // Lifted so Feedback & Analysis Report pages can use it
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [showResetPassword, setShowResetPassword] = useState(false);
 
   // Check if user is already logged in
   useEffect(() => {
@@ -206,6 +207,45 @@ function App() {
       } finally {
         setLoading(false);
       }
+    }
+  };
+
+  const handleResetSubmit = async (e) => {
+    e.preventDefault();
+    if (!formData.email && !formData.phone) {
+      alert('Please enter your email or phone number');
+      return;
+    }
+    if (!formData.name) {
+      alert('Please enter your full name for verification');
+      return;
+    }
+    if (!formData.password) {
+      alert('Please enter a new password');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const resetData = {
+        name: formData.name,
+        new_password: formData.password
+      };
+      if (formData.email) resetData.email = formData.email;
+      else resetData.phone = formData.phone;
+
+      await fraudApi.resetPassword(resetData);
+      alert('Password reset successful! You can now login with your new password.');
+      setShowResetPassword(false);
+      setIsLogin(true);
+      setFormData(prev => ({ ...prev, password: '', confirmPassword: '' }));
+    } catch (err) {
+      setError(err.message);
+      alert(err.message || 'Reset failed. Please verify your details.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -474,7 +514,9 @@ function App() {
               </h1>
             </div>
             <p style={{ color: '#9ca3af', fontSize: '15px', marginTop: '10px' }}>
-              {isLogin ? 'Welcome back! Please login to your account' : 'Create your account to get started'}
+              {showResetPassword
+                ? 'Enter your details to reset your password'
+                : (isLogin ? 'Welcome back! Please login to your account' : 'Create your account to get started')}
             </p>
           </div>
 
@@ -505,14 +547,14 @@ function App() {
                 WebkitTextFillColor: 'transparent',
                 backgroundClip: 'text'
               }}>
-                {isLogin ? 'Welcome Back' : 'Create Account'}
+                {showResetPassword ? 'Reset Password' : (isLogin ? 'Welcome Back' : 'Create Account')}
               </h2>
             </div>
 
             {/* Form Body */}
             <div style={{ padding: '2px 32px' }}>
-              <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                {!isLogin && (
+              <form onSubmit={showResetPassword ? handleResetSubmit : handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {(!isLogin || showResetPassword) && (
                   <div>
                     <label style={{ display: 'block', marginBottom: '2px', color: '#e5e7eb', fontSize: '14px', fontWeight: '500' }}>
                       Full Name
@@ -634,7 +676,7 @@ function App() {
 
                 <div>
                   <label style={{ display: 'block', marginBottom: '4px', color: '#e5e7eb', fontSize: '12px', fontWeight: '500' }}>
-                    Password
+                    {showResetPassword ? 'New Password' : 'Password'}
                   </label>
                   <input
                     type="password"
@@ -696,10 +738,11 @@ function App() {
                   </div>
                 )}
 
-                {isLogin && (
+                {isLogin && !showResetPassword && (
                   <div style={{ textAlign: 'right' }}>
                     <button
                       type="button"
+                      onClick={() => setShowResetPassword(true)}
                       style={{
                         background: 'none',
                         border: 'none',
@@ -710,6 +753,25 @@ function App() {
                       }}
                     >
                       Forgot Password?
+                    </button>
+                  </div>
+                )}
+
+                {showResetPassword && (
+                  <div style={{ textAlign: 'right' }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowResetPassword(false)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#60a5fa',
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                        textDecoration: 'underline'
+                      }}
+                    >
+                      Back to Login
                     </button>
                   </div>
                 )}
@@ -746,7 +808,7 @@ function App() {
                     }
                   }}
                 >
-                  {loading ? 'Processing...' : (isLogin ? 'Login' : 'Sign Up')}
+                  {loading ? 'Processing...' : (showResetPassword ? 'Reset Password' : (isLogin ? 'Login' : 'Sign Up'))}
                 </button>
 
                 {error && (

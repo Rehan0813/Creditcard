@@ -73,6 +73,13 @@ export const fraudApi = {
     return response;
   },
 
+  async resetPassword(resetData) {
+    return await apiRequest('/api/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify(resetData),
+    });
+  },
+
   logout() {
     localStorage.removeItem('auth_token');
     localStorage.removeItem('user');
