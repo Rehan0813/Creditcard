@@ -220,7 +220,7 @@ function App() {
       if (currentPage === 'feedback') return <FeedbackPage result={result} setCurrentPage={setCurrentPage} />;
       if (currentPage === 'report') return <ReportPage result={result} setCurrentPage={setCurrentPage} />;
       if (currentPage === 'analysisreport') return <AnalysisReportPage result={result} setResult={setResult} setCurrentPage={setCurrentPage} />;
-      return <Dashboard result={result} setResult={setResult} setCurrentPage={setCurrentPage} />;
+      return <Dashboard result={result} setResult={setResult} setCurrentPage={setCurrentPage} setIsLoggedIn={setIsLoggedIn} />;
     };
     return <VantaNetLayout>{renderPage()}</VantaNetLayout>;
   }

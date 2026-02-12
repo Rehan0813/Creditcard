@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { fraudApi } from '../api/fraudApi';
 
-const Dashboard = ({ result, setResult, setCurrentPage }) => {
+const Dashboard = ({ result, setResult, setCurrentPage, setIsLoggedIn }) => {
   // Global state backup to prevent loss
   if (typeof window !== 'undefined') {
     window.dashboardState = window.dashboardState || {};
@@ -313,6 +313,13 @@ const Dashboard = ({ result, setResult, setCurrentPage }) => {
     a.click();
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('user');
+    setIsLoggedIn(false);
+    setCurrentPage('dashboard'); // Reset for next login
   };
 
   if (transactions.length > 1 && fileId) {
@@ -928,46 +935,44 @@ const Dashboard = ({ result, setResult, setCurrentPage }) => {
         </div>
       </div>
 
-      {/* Feedback and Review Button - Top Left */}
+      {/* Logout Button - Top Left */}
       <div style={{
         position: 'fixed',
-        top: '20px',
+        top: '45px',
         left: '20px',
         zIndex: 30
       }}>
         <button
-          onClick={() => result ? setCurrentPage('feedback') : alert('Please analyze a file first before submitting feedback.')}
-          disabled={!result}
+          onClick={handleLogout}
           style={{
-            padding: '8px 16px',
-            background: result ? 'rgba(56, 189, 248, 0.3)' : 'rgba(107, 114, 128, 0.2)',
-            border: result ? '2px solid rgba(56, 189, 248, 0.6)' : '2px solid rgba(107, 114, 128, 0.3)',
-            borderRadius: '10px',
-            color: result ? '#e0f2fe' : '#9ca3af',
-            fontSize: '12px',
+            padding: '6px 12px',
+            background: 'linear-gradient(135deg, #ef4444, #b91c1c)',
+            border: '2px solid rgba(248, 113, 113, 0.6)',
+            borderRadius: '12px',
+            color: 'white',
+            fontSize: '14px',
             fontWeight: 'bold',
-            cursor: result ? 'pointer' : 'not-allowed',
-            transition: 'all 0.3s ease',
+            cursor: 'pointer',
+            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
             backdropFilter: 'blur(10px)',
-            boxShadow: result ? '0 4px 20px rgba(56, 189, 248, 0.35)' : '0 2px 10px rgba(107, 114, 128, 0.2)',
-            opacity: result ? 1 : 0.6
+            boxShadow: '0 4px 20px rgba(239, 68, 68, 0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            textShadow: '0 1px 2px rgba(0,0,0,0.2)'
           }}
           onMouseOver={(e) => {
-            if (result) {
-              e.target.style.background = 'rgba(56, 189, 248, 0.45)';
-              e.target.style.transform = 'translateY(-2px) scale(1.05)';
-              e.target.style.boxShadow = '0 8px 30px rgba(56, 189, 248, 0.45)';
-            }
+            e.currentTarget.style.transform = 'translateY(-2px) scale(1.05)';
+            e.currentTarget.style.boxShadow = '0 8px 30px rgba(239, 68, 68, 0.6), 0 0 20px rgba(239, 68, 68, 0.4)';
+            e.currentTarget.style.background = 'linear-gradient(135deg, #f87171, #dc2626)';
           }}
           onMouseOut={(e) => {
-            if (result) {
-              e.target.style.background = 'rgba(56, 189, 248, 0.3)';
-              e.target.style.transform = 'translateY(0) scale(1)';
-              e.target.style.boxShadow = '0 4px 20px rgba(56, 189, 248, 0.35)';
-            }
+            e.currentTarget.style.transform = 'translateY(0) scale(1)';
+            e.currentTarget.style.boxShadow = '0 4px 20px rgba(239, 68, 68, 0.4)';
+            e.currentTarget.style.background = 'linear-gradient(135deg, #ef4444, #b91c1c)';
           }}
         >
-          📝 Feedback and Review
+          <span style={{ fontSize: '18px' }}>🚪</span> Logout
         </button>
       </div>
 

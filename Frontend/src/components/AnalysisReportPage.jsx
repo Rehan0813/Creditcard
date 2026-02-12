@@ -1,6 +1,6 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+import autoTable from 'jspdf-autotable';
 
 /**
  * Full-page Fraud Analysis Report (same layout as How to Use / Model Evaluation).
@@ -12,53 +12,155 @@ const AnalysisReportPage = ({ result, setResult, setCurrentPage }) => {
     setCurrentPage('dashboard');
   };
 
-  const reportRef = useRef();
+  const handleDownloadPDF = () => {
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    let currentY = 20;
 
-  const handleDownloadPDF = async () => {
-    if (!reportRef.current) return;
+    // Helper to add centered title
+    const addTitle = (text, size = 18, color = [0, 0, 0]) => {
+      doc.setFontSize(size);
+      doc.setTextColor(...color);
+      doc.setFont('helvetica', 'bold');
+      const textWidth = doc.getTextWidth(text);
+      doc.text(text, (pageWidth - textWidth) / 2, currentY);
+      currentY += size / 2 + 5;
+    };
 
-    try {
-      const canvas = await html2canvas(reportRef.current, {
-        backgroundColor: '#0f172a', // Dark slate background to match theme
-        scale: 2,
-        logging: false,
-        useCORS: true,
-        allowTaint: true,
-        scrollY: -window.scrollY
+    // Helper for section headers
+    const addSectionHeader = (text) => {
+      doc.setFontSize(14);
+      doc.setTextColor(51, 65, 85); // Slate-700
+      doc.setFont('helvetica', 'bold');
+      doc.text(text, 15, currentY);
+      currentY += 10;
+    };
+
+    // 0. Report Header
+    doc.setFillColor(15, 23, 42); // Dark background for header
+    doc.rect(0, 0, pageWidth, 40, 'F');
+    currentY = 25;
+    addTitle('FRAUD ANALYSIS REPORT', 22, [255, 255, 255]);
+    currentY = 50;
+
+    // 1. Transaction Summary
+    addSectionHeader('1. Transaction Summary');
+    const isBatch = result?.allPredictions && result.allPredictions.length > 1;
+
+    if (isBatch && result.selectedIndices?.length) {
+      const rows = result.selectedIndices.map((idx, i) => {
+        const tx = result.transactionsList[idx] || {};
+        return [
+          i + 1,
+          tx.amount || '–',
+          tx.country || '–',
+          tx.merchant_category || '–',
+          tx.payment_method || '–',
+          (tx.transaction_time || '–').toString().slice(0, 16)
+        ];
       });
 
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-
-      const imgProps = pdf.getImageProperties(imgData);
-      const contentHeight = (imgProps.height * pdfWidth) / imgProps.width;
-
-      // If content fits on one page
-      if (contentHeight <= pdfHeight) {
-        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, contentHeight);
-      } else {
-        // Multi-page support
-        let heightLeft = contentHeight;
-        let position = 0;
-
-        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, contentHeight);
-        heightLeft -= pdfHeight;
-
-        while (heightLeft > 0) {
-          position = heightLeft - contentHeight;
-          pdf.addPage();
-          pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, contentHeight);
-          heightLeft -= pdfHeight;
-        }
-      }
-
-      pdf.save(`fraud-analysis-report-${result.transactionId || 'batch'}.pdf`);
-    } catch (error) {
-      console.error('Error generating PDF:', error);
-      alert('Failed to generate PDF. Please try again.');
+      autoTable(doc, {
+        startY: currentY,
+        head: [['#', 'Amount', 'Country', 'Category', 'Method', 'Time']],
+        body: rows,
+        theme: 'striped',
+        headStyles: { fillColor: [59, 130, 246] }, // Blue-500
+        margin: { left: 15, right: 15 }
+      });
+      currentY = doc.lastAutoTable.finalY + 15;
+    } else {
+      const summaryData = [
+        ['Transaction ID', result.transactionId || '–'],
+        ['Amount', result.amount || '–'],
+        ['Country', result.country || '–'],
+        ['Merchant Category', result.merchantCategory || '–'],
+        ['Payment Method', result.paymentMethod || '–'],
+        ['Transaction Time', result.transactionTime || '–']
+      ];
+      autoTable(doc, {
+        startY: currentY,
+        body: summaryData,
+        theme: 'plain',
+        styles: { fontSize: 11, cellPadding: 3 },
+        columnStyles: { 0: { fontStyle: 'bold', width: 50 } },
+        margin: { left: 15 }
+      });
+      currentY = doc.lastAutoTable.finalY + 15;
     }
+
+    // New page if needed
+    if (currentY > 230) { doc.addPage(); currentY = 20; }
+
+    // 3. Model Prediction
+    addSectionHeader('3. Model Prediction');
+    const displayScoreVal = isBatch ? Math.max(...result.allPredictions.map(p => p.fraud_score || 0)).toFixed(2) : result.score;
+    const displayLevelVal = isBatch ? (displayScoreVal < 0.3 ? 'Low' : displayScoreVal < 0.7 ? 'Medium' : 'High') : result.riskLevel;
+    const displayActionVal = isBatch ? (displayScoreVal < 0.3 ? 'Safe' : displayScoreVal < 0.7 ? 'Verify' : 'Block') : result.action;
+
+    doc.setFontSize(12);
+    doc.setTextColor(0, 0, 0);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Fraud Risk Score: `, 20, currentY);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`${displayScoreVal}`, 60, currentY);
+    currentY += 8;
+
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Risk Level: `, 20, currentY);
+    doc.setFont('helvetica', 'bold');
+    const levelColor = displayLevelVal === 'Low' ? [16, 185, 129] : displayLevelVal === 'High' ? [239, 68, 68] : [245, 158, 11];
+    doc.setTextColor(...levelColor);
+    doc.text(`${displayLevelVal}`, 60, currentY);
+    currentY += 8;
+
+    doc.setTextColor(0, 0, 0);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Recommended Action: `, 20, currentY);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...levelColor);
+    doc.text(`${displayActionVal}`, 65, currentY);
+    currentY += 12;
+
+    doc.setFontSize(10);
+    doc.setTextColor(100, 116, 139); // Slate-500
+    doc.setFont('helvetica', 'italic');
+    doc.text("This is the AI's decision based on the transaction analysis.", 20, currentY);
+    currentY += 15;
+
+    // 4. Risk Explanation
+    if (currentY > 240) { doc.addPage(); currentY = 20; }
+    addSectionHeader('4. Risk Explanation');
+    doc.setFontSize(11);
+    doc.setTextColor(51, 65, 85);
+    doc.setFont('helvetica', 'bold');
+    doc.text(isBatch ? 'Why was this batch flagged?' : 'Why was this transaction flagged?', 20, currentY);
+    currentY += 8;
+
+    doc.setFont('helvetica', 'normal');
+    const reasonsList = (isBatch && result.allPredictions[0]?.reasons) || result.reasons || [];
+    reasonsList.forEach(reason => {
+      const splitReason = doc.splitTextToSize(`- ${reason}`, pageWidth - 40);
+      doc.text(splitReason, 25, currentY);
+      currentY += (splitReason.length * 6);
+    });
+
+    currentY += 10;
+    doc.setFillColor(240, 253, 244); // Light green background
+    doc.rect(15, currentY, pageWidth - 30, 10, 'F');
+    doc.setTextColor(22, 163, 74); // Green-600
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'italic');
+    doc.text("This makes the prediction explainable and transparent.", pageWidth / 2, currentY + 6.5, { align: 'center' });
+
+    // Footer
+    const dateStr = new Date().toLocaleString();
+    doc.setFontSize(8);
+    doc.setTextColor(148, 163, 184);
+    doc.text(`Generated on: ${dateStr}`, 15, doc.internal.pageSize.getHeight() - 10);
+    doc.text(`Report ID: ${result.transactionId || 'BATCH-' + Date.now()}`, pageWidth - 15, doc.internal.pageSize.getHeight() - 10, { align: 'right' });
+
+    doc.save(`fraud-analysis-report-${result.transactionId || 'batch'}.pdf`);
   };
 
   const isBatch = result?.allPredictions && result.allPredictions.length > 1;
@@ -109,7 +211,7 @@ const AnalysisReportPage = ({ result, setResult, setCurrentPage }) => {
   }
 
   return (
-    <div ref={reportRef} style={{
+    <div style={{
       position: 'relative',
       padding: '20px',
       minHeight: '100%',
@@ -125,7 +227,6 @@ const AnalysisReportPage = ({ result, setResult, setCurrentPage }) => {
         marginBottom: '20px'
       }}>
         <button
-          data-html2canvas-ignore
           id="back-btn"
           onClick={goBackToDashboard}
           style={{
@@ -165,7 +266,6 @@ const AnalysisReportPage = ({ result, setResult, setCurrentPage }) => {
         </h1>
 
         <button
-          data-html2canvas-ignore
           id="feedback-btn"
           onClick={() => setCurrentPage('feedback')}
           style={{
@@ -196,7 +296,6 @@ const AnalysisReportPage = ({ result, setResult, setCurrentPage }) => {
         </button>
 
         <button
-          data-html2canvas-ignore
           id="download-btn"
           onClick={handleDownloadPDF}
           style={{
