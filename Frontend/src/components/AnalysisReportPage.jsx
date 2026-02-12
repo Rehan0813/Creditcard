@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useRef } from 'react';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 
 /**
  * Full-page Fraud Analysis Report (same layout as How to Use / Model Evaluation).
@@ -8,6 +10,55 @@ const AnalysisReportPage = ({ result, setResult, setCurrentPage }) => {
   const goBackToDashboard = () => {
     setResult(null);
     setCurrentPage('dashboard');
+  };
+
+  const reportRef = useRef();
+
+  const handleDownloadPDF = async () => {
+    if (!reportRef.current) return;
+
+    try {
+      const canvas = await html2canvas(reportRef.current, {
+        backgroundColor: '#0f172a', // Dark slate background to match theme
+        scale: 2,
+        logging: false,
+        useCORS: true,
+        allowTaint: true,
+        scrollY: -window.scrollY
+      });
+
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+
+      const imgProps = pdf.getImageProperties(imgData);
+      const contentHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+      // If content fits on one page
+      if (contentHeight <= pdfHeight) {
+        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, contentHeight);
+      } else {
+        // Multi-page support
+        let heightLeft = contentHeight;
+        let position = 0;
+
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, contentHeight);
+        heightLeft -= pdfHeight;
+
+        while (heightLeft > 0) {
+          position = heightLeft - contentHeight;
+          pdf.addPage();
+          pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, contentHeight);
+          heightLeft -= pdfHeight;
+        }
+      }
+
+      pdf.save(`fraud-analysis-report-${result.transactionId || 'batch'}.pdf`);
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      alert('Failed to generate PDF. Please try again.');
+    }
   };
 
   const isBatch = result?.allPredictions && result.allPredictions.length > 1;
@@ -58,7 +109,7 @@ const AnalysisReportPage = ({ result, setResult, setCurrentPage }) => {
   }
 
   return (
-    <div style={{
+    <div ref={reportRef} style={{
       position: 'relative',
       padding: '20px',
       minHeight: '100%',
@@ -74,6 +125,8 @@ const AnalysisReportPage = ({ result, setResult, setCurrentPage }) => {
         marginBottom: '20px'
       }}>
         <button
+          data-html2canvas-ignore
+          id="back-btn"
           onClick={goBackToDashboard}
           style={{
             position: 'absolute',
@@ -112,6 +165,8 @@ const AnalysisReportPage = ({ result, setResult, setCurrentPage }) => {
         </h1>
 
         <button
+          data-html2canvas-ignore
+          id="feedback-btn"
           onClick={() => setCurrentPage('feedback')}
           style={{
             position: 'absolute',
@@ -141,33 +196,14 @@ const AnalysisReportPage = ({ result, setResult, setCurrentPage }) => {
         </button>
 
         <button
-          onClick={() => {
-            const reportData = {
-              title: 'Fraud Analysis Report',
-              transactionId: result.transactionId,
-              amount: result.amount,
-              country: result.country,
-              merchantCategory: result.merchantCategory,
-              paymentMethod: result.paymentMethod,
-              transactionTime: result.transactionTime,
-              riskScore: result.score,
-              riskLevel: result.riskLevel,
-              recommendedAction: result.action,
-              reasons: result.reasons,
-              generatedAt: new Date().toISOString()
-            };
-            const dataStr = JSON.stringify(reportData, null, 2);
-            const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
-            const linkElement = document.createElement('a');
-            linkElement.setAttribute('href', dataUri);
-            linkElement.setAttribute('download', `fraud-analysis-report-${result.transactionId}.json`);
-            linkElement.click();
-          }}
+          data-html2canvas-ignore
+          id="download-btn"
+          onClick={handleDownloadPDF}
           style={{
             position: 'absolute',
             top: '20px',
             right: '40px',
-            padding: '10px 20px',
+            padding: '10px 10px',
             background: 'linear-gradient(135deg, #10b981, #059669)',
             border: '1px solid rgba(16, 185, 129, 0.3)',
             borderRadius: '8px',
@@ -177,7 +213,7 @@ const AnalysisReportPage = ({ result, setResult, setCurrentPage }) => {
             fontWeight: 'bold'
           }}
         >
-          📥 Download Report
+          📥 Download Report (PDF)
         </button>
       </div>
 
