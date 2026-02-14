@@ -171,40 +171,36 @@ class FeedbackResponse(BaseModel):
 #
 # Load ML model from new `fraud-model` package
 #
+#
+# Load ML model from `finalmodel` package
+#
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-FRAUD_MODEL_DIR = os.path.join(BASE_DIR, "model")
-FRAUD_MODEL_PATH = os.path.join(FRAUD_MODEL_DIR, "fraud_model.pkl")
-ENCODERS_PATH = os.path.join(FRAUD_MODEL_DIR, "encoders.pkl")
+# Point to ../finalmodel/models relative to backend/
+FRAUD_MODEL_DIR = os.path.join(BASE_DIR, "..", "finalmodel", "models")
+FRAUD_MODEL_PATH = os.path.join(FRAUD_MODEL_DIR, "fraud_pipeline.pkl")
+LABEL_ENCODER_PATH = os.path.join(FRAUD_MODEL_DIR, "label_encoder.pkl")
 
 MODEL_LOADED = False
-model = None
-encoders = None
-feature_names = None
+model_pipeline = None
+label_encoder = None
 
 try:
-    if os.path.exists(FRAUD_MODEL_PATH) and os.path.exists(ENCODERS_PATH):
-        model = joblib.load(FRAUD_MODEL_PATH)
-        encoders = joblib.load(ENCODERS_PATH)
+    if os.path.exists(FRAUD_MODEL_PATH) and os.path.exists(LABEL_ENCODER_PATH):
+        model_pipeline = joblib.load(FRAUD_MODEL_PATH)
+        label_encoder = joblib.load(LABEL_ENCODER_PATH)
         
-        # Load feature names if available to ensure order consistency
-        FEATURE_NAMES_PATH = os.path.join(FRAUD_MODEL_DIR, "feature_names.pkl")
-        if os.path.exists(FEATURE_NAMES_PATH):
-            feature_names = joblib.load(FEATURE_NAMES_PATH)
-            
         MODEL_LOADED = True
-        print(f"[OK] fraud-model loaded from {FRAUD_MODEL_PATH}")
-        if feature_names:
-            print(f"[INFO] Using feature names: {feature_names}")
+        logger.info(f"[OK] fraud-model loaded from {FRAUD_MODEL_PATH}")
+        logger.info(f"Label Encoder classes: {label_encoder.classes_}")
     else:
-        print(f"[WARNING] fraud-model assets not found at {FRAUD_MODEL_PATH} / {ENCODERS_PATH}")
+        logger.warning(f"[WARNING] fraud-model assets not found at {FRAUD_MODEL_PATH}")
 except Exception as e:
     import traceback
-    print(f"[WARNING] Could not load fraud-model: {e}")
+    logger.error(f"[WARNING] Could not load fraud-model: {e}")
     traceback.print_exc()
-    print("[INFO] API will work with fallback predictions")
     MODEL_LOADED = False
-    model = None
-    encoders = None
+    model_pipeline = None
+    label_encoder = None
 
 
 # Authentication endpoints
@@ -421,263 +417,264 @@ def get_file_transactions(
     return {"transactions": transactions, "total": len(transactions)}
 
 
-# Prediction endpoint
-def get_risk_metadata(fraud_score: float, is_fallback: bool = False):
-    """Generate risk level, action, and reasons based on fraud score"""
-    if fraud_score < 0.3:
+def get_risk_metadata(final_risk_score: float):
+    """
+    Generate risk level, action, and reasons based on FINAL hybrid risk score (0-100).
+    SAFE: 0-30
+    VERIFY: 31-70
+    BLOCK: 71-100
+    """
+    if final_risk_score <= 30:
         return {
             "risk_level": "Low",
             "recommended_action": "Safe",
-            "reasons": [
-                "Transaction amount within normal spending patterns",
-                "Merchant category and location match regular purchasing behavior",
-                "Transaction time and payment method consistent with historical activity"
-            ]
+            "reasons": ["Hybrid Score indicates low risk (0-30)"]
         }
-    elif fraud_score < 0.7:
-        reasons = [
-            "Transaction amount higher than average but within reasonable limits",
-            "Geographic location differs from usual purchasing areas",
-            "Payment method used is valid but requires additional verification"
-        ]
-        if is_fallback:
-            reasons.append("Model is currently using a fallback assessment.")
-            
+    elif final_risk_score <= 70:
         return {
             "risk_level": "Medium",
             "recommended_action": "Verify",
-            "reasons": reasons
+            "reasons": ["Hybrid Score indicates medium risk (31-70)"]
         }
     else:
         return {
             "risk_level": "High",
             "recommended_action": "Block",
-            "reasons": [
-                "Transaction matches known high-risk fraud patterns",
-                "Multiple risk indicators detected (velocity, location mismatch)",
-                "Immediate intervention recommended to prevent potential loss"
-            ]
+            "reasons": ["Hybrid Score indicates high risk (71-100)"]
         }
+
+def calculate_rule_risk(data_norm: dict):
+    """
+    Implements the deterministic rule-based logic.
+    Returns: (rule_score, rule_reason)
+    """
+    # 1. Parse Inputs
+    try:
+        amount = float(data_norm.get("amount", 0.0) or 0.0)
+    except:
+        amount = 0.0
+
+    ts_raw = str(data_norm.get("transaction_time", ""))
+    # Default to current time if missing
+    try:
+        ts = pd.to_datetime(ts_raw, dayfirst=True, errors='coerce')
+        if pd.isna(ts):
+            ts = pd.Timestamp.utcnow()
+    except:
+        ts = pd.Timestamp.utcnow()
+
+    hour = ts.hour
+    
+    # helper for country
+    country_map = {
+        "usa": "usa", "us": "usa", "united states": "usa",
+        "uk": "uk", "united kingdom": "uk", "gb": "uk",
+        "in": "india", "india": "india",
+        "ae": "uae", "uae": "uae", "united arab emirates": "uae",
+        "de": "germany", "germany": "germany", "deutschland": "germany"
+    }
+    raw_country = str(data_norm.get("country", "unknown")).lower().strip()
+    country = country_map.get(raw_country, raw_country)
+
+    # 2. Time Classification Rule
+    # Daytime: 06:00 – 21:59 (hours 6 to 21 inclusive)
+    # Nighttime: 22:00 – 05:59
+    if 6 <= hour <= 21:
+        is_daytime = True
+        time_str = "Daytime"
+    else:
+        is_daytime = False
+        time_str = "Nighttime"
+
+    # 3. Apply Rules
+    # Score mapping:
+    # SAFE zone → 0–30
+    # VERIFY zone → 31–70
+    # BLOCK zone → 71–100
+    # Risk increases proportionally with Amount
+    
+    rule_score = 50.0 # Default
+    reason = "Default Rule"
+    rule_decision = "VERIFY" # Default
+
+    def calculate_proportional_score(val, min_val, max_val, min_score, max_score):
+        """Linearly map val from [min_val, max_val] to [min_score, max_score]"""
+        if max_val == min_val: return max_score
+        pct = (val - min_val) / (max_val - min_val)
+        score = min_score + (pct * (max_score - min_score))
+        return min(max(score, min_score), max_score)
+
+    if country == "india":
+        # Domestic Rules
+        if is_daytime:
+            # Daytime Limits: Safe < 5000, Verify < 25000
+            if amount < 5000:
+                # SAFE Zone (0-30)
+                rule_score = calculate_proportional_score(amount, 0, 5000, 0, 30)
+                rule_decision = "SAFE"
+                reason = f"Domestic (Day) & Amount {amount:.0f} < 5000 -> SAFE (Score: {rule_score:.1f})"
+            elif amount <= 25000:
+                # VERIFY Zone (31-70)
+                rule_score = calculate_proportional_score(amount, 5000, 25000, 31, 70)
+                rule_decision = "VERIFY"
+                reason = f"Domestic (Day) & Amount {amount:.0f} in [5000, 25000] -> VERIFY (Score: {rule_score:.1f})"
+            else:
+                # BLOCK Zone (71-100)
+                # Cap scaling at some reasonable max amount, e.g., 50000 for 100% score
+                rule_score = calculate_proportional_score(amount, 25000, 50000, 71, 100)
+                rule_decision = "BLOCK"
+                reason = f"Domestic (Day) & Amount {amount:.0f} > 25000 -> BLOCK (Score: {rule_score:.1f})"
+        else:
+            # Nighttime Limits: Safe < 3000, Verify < 10000
+            if amount < 3000:
+                # SAFE Zone (0-30)
+                rule_score = calculate_proportional_score(amount, 0, 3000, 5, 30) # Night starts slightly higher risk
+                rule_decision = "SAFE"
+                reason = f"Domestic (Night) & Amount {amount:.0f} < 3000 -> SAFE (Score: {rule_score:.1f})"
+            elif amount <= 10000:
+                # VERIFY Zone (31-70)
+                rule_score = calculate_proportional_score(amount, 3000, 10000, 31, 70)
+                rule_decision = "VERIFY"
+                reason = f"Domestic (Night) & Amount {amount:.0f} in [3000, 10000] -> VERIFY (Score: {rule_score:.1f})"
+            else:
+                # BLOCK Zone (71-100)
+                rule_score = calculate_proportional_score(amount, 10000, 20000, 71, 100)
+                rule_decision = "BLOCK"
+                reason = f"Domestic (Night) & Amount {amount:.0f} > 10000 -> BLOCK (Score: {rule_score:.1f})"
+    else:
+        # Foreign Rules
+        # Foreign starts at VERIFY minimum.
+        if is_daytime:
+            # Limit: Verify <= 20000
+            if amount <= 20000:
+                # VERIFY Zone (35-70) - Foreign minimum higher
+                rule_score = calculate_proportional_score(amount, 0, 20000, 35, 70)
+                rule_decision = "VERIFY"
+                reason = f"Foreign (Day) & Amount {amount:.0f} <= 20000 -> VERIFY (Score: {rule_score:.1f})"
+            else:
+                # BLOCK Zone (71-100)
+                rule_score = calculate_proportional_score(amount, 20000, 40000, 71, 100)
+                rule_decision = "BLOCK"
+                reason = f"Foreign (Day) & Amount {amount:.0f} > 20000 -> BLOCK (Score: {rule_score:.1f})"
+        else: # Nighttime
+            # Limit: Verify <= 10000
+            if amount <= 10000:
+                # VERIFY Zone (40-70) - Foreign Night higher minimum
+                rule_score = calculate_proportional_score(amount, 0, 10000, 40, 70)
+                rule_decision = "VERIFY"
+                reason = f"Foreign (Night) & Amount {amount:.0f} <= 10000 -> VERIFY (Score: {rule_score:.1f})"
+            else:
+                # BLOCK Zone (71-100)
+                rule_score = calculate_proportional_score(amount, 10000, 20000, 71, 100)
+                rule_decision = "BLOCK"
+                reason = f"Foreign (Night) & Amount {amount:.0f} > 10000 -> BLOCK (Score: {rule_score:.1f})"
+                
+    return rule_score, reason, rule_decision
 
 def calculate_prediction(data: dict):
     """
-    Core prediction logic: replicates feature engineering from train.py.
+    Hybrid Prediction Logic:
+    Final Risk = (0.6 * ML Risk) + (0.4 * Rule Risk)
+    CRITICAL: Rule BLOCK overrides everything.
     """
-    # Normalize keys: lowercase, strip, spaces -> underscores
+    # Normalize inputs
     data_norm = {str(k).strip().lower().replace(" ", "_"): v for k, v in data.items()}
     logger.info(f"DEBUG: calculate_prediction input: {data_norm}")
 
-    if not MODEL_LOADED or model is None or encoders is None:
-        logger.warning(f"Fallback to 0.5: Model or Encoders not loaded. MODEL_LOADED={MODEL_LOADED}")
-        metadata = get_risk_metadata(0.5, is_fallback=True)
-        return {
-            "fraud_score": 0.5,
-            **metadata,
-        }
-
-    try:
-        # --- 1. Basic Features ---
-        amount = float(data_norm.get("amount", 0.0) or 0.0)
-        ts_raw = data_norm.get("transaction_time", "")
+    # 1. Calculate Rule Risk
+    rule_risk_score, rule_reason, rule_decision = calculate_rule_risk(data_norm)
+    
+    # 2. Calculate ML Risk
+    ml_risk_score = 50.0  # Default fallback
+    ml_reason = "ML Model not loaded"
+    
+    if MODEL_LOADED and model_pipeline and label_encoder:
         try:
-            ts = pd.to_datetime(ts_raw, dayfirst=True, errors='coerce')
-            if pd.isna(ts):
-                ts = pd.Timestamp.utcnow()
-        except:
-            ts = pd.Timestamp.utcnow()
-        
-        hour = int(ts.hour)
-        day_of_week = int(ts.dayofweek)
-        is_weekend = 1 if day_of_week in [5, 6] else 0
-        is_night = 1 if (hour < 6 or hour > 22) else 0
-        
-        # --- 2. Advanced Features (Simplified for new model) ---
-        log_amount = np.log1p(amount)
-        
-        # Helper for country mapping
-        country_map = {
-            "US": "usa", "USA": "usa", "UNITED STATES": "usa",
-            "UK": "uk", "UNITED KINGDOM": "uk", "GB": "uk",
-            "IN": "india", "INDIA": "india",
-            "AE": "uae", "UAE": "uae", "UNITED ARAB EMIRATES": "uae",
-            "DE": "germany", "GERMANY": "germany", "DEUTSCHLAND": "germany"
-        }
-
-        # --- 3. Categorical Encoding ---
-        cat_cols = ["merchant_category", "country", "device_type", "payment_method"]
-        encoded_cats = {}
-        for col in cat_cols:
-            le = encoders.get(col)
-            val = str(data_norm.get(col, "UNKNOWN")).strip()
+            # Prepare input compatible with the pipeline
+            input_df = pd.DataFrame([{
+                "amount": float(data_norm.get("amount", 0)),
+                "country": str(data_norm.get("country", "UNKNOWN")),
+                "transaction_time": str(data_norm.get("transaction_time", ""))
+            }])
             
-            # Special handling for country
-            if col == "country" and val.upper() in country_map:
-                val = country_map[val.upper()]
+            # Predict probabilities
+            probas = model_pipeline.predict_proba(input_df)[0]
+            classes = label_encoder.classes_
             
-            if le:
-                classes = list(le.classes_)
-                classes_lower = [str(c).lower() for c in classes]
-                val_lower = val.lower()
-                
-                if val_lower in classes_lower:
-                    idx = classes_lower.index(val_lower)
-                    encoded_cats[col] = int(le.transform([classes[idx]])[0])
-                elif "unknown" in classes_lower:
-                    idx = classes_lower.index("unknown")
-                    encoded_cats[col] = int(le.transform([classes[idx]])[0])
+            # Calculate a weighted ML risk score (0-100)
+            risk_weighted_sum = 0.0
+            for i, cls_name in enumerate(classes):
+                c_upper = cls_name.upper()
+                p = probas[i]
+                if "SAFE" in c_upper:
+                    risk_weighted_sum += p * 0
+                elif "VERIFY" in c_upper:
+                    risk_weighted_sum += p * 50
+                elif "BLOCK" in c_upper:
+                    risk_weighted_sum += p * 100
                 else:
-                    # Log warning for missing value to help debug
-                    logger.warning(f"Value '{val}' not found for feature '{col}'. Classes: {classes[:5]}...")
-                    encoded_cats[col] = int(le.transform([classes[0]])[0])
-            else:
-                encoded_cats[col] = 0
-
-        # --- 4. Construct Row ---
-        # Features: amount, log_amount, hour, day_of_week, is_weekend, is_night, merchant_category, country, device_type, payment_method
-        row = {
-            "amount": amount,
-            "log_amount": log_amount,
-            "hour": hour,
-            "day_of_week": day_of_week,
-            "is_weekend": is_weekend,
-            "is_night": is_night,
-            **encoded_cats
+                    risk_weighted_sum += p * 50
+            
+            ml_risk_score = risk_weighted_sum
+            # Select top class for logging/reason
+            top_class_idx = np.argmax(probas)
+            top_class = classes[top_class_idx]
+            ml_reason = f"ML Prediction: {top_class} (Conf: {probas[top_class_idx]:.2f})"
+            
+        except Exception as e:
+            logger.error(f"ML Prediction Error: {e}")
+            ml_risk_score = 50.0 # Fallback
+            ml_reason = f"ML Error: {str(e)}"
+    
+    # 3. Calculate Final Risk
+    # Formula: Final Risk = (0.6 × ML Risk) + (0.4 × Rule Risk)
+    final_risk_score = (0.6 * ml_risk_score) + (0.4 * rule_risk_score)
+    final_risk_score = round(final_risk_score, 2)
+    
+    # 4. Generate Metadata (Risk Level, Action)
+    # CRITICAL FIX: If Rule Decision == BLOCK, Final Action = BLOCK
+    
+    if rule_decision == "BLOCK":
+        metadata = {
+            "risk_level": "High",
+            "recommended_action": "Block",
+            "reasons": [f"CRITICAL: Rule Violation ({rule_reason}) overrides ML."]
         }
-
-        # Use the explicit feature names if loaded to ensure order
-        if feature_names:
-            # Ensure all feature names are in row, fill 0 if missing
-            for fname in feature_names:
-                if fname not in row:
-                    row[fname] = 0
-            X = pd.DataFrame([row])[feature_names]
-        else:
-            # Fallback
-            cols = [
-                "amount", "log_amount", 
-                "hour", "day_of_week", "is_weekend", "is_night",
-                "merchant_category", "country", "device_type", "payment_method"
-            ]
-            X = pd.DataFrame([row])[cols]
-
-
-        # --- 5. Predict with Multi-Class Model ---
-        # Multi-class model: predict_proba returns [prob_safe, prob_verify, prob_block]
-        proba = model.predict_proba(X)[0]
+        # Optionally force score to reflect high risk if it's somehow low? 
+        # But we keep the calculated hybrid score for transparency unless requested otherwise.
+        # User said "Use FinalRisk thresholds" ELSE. logic implies we skip thresholds here.
+    else:
+        metadata = get_risk_metadata(final_risk_score)
+    
+    # 5. Construct Reasons
+    # Combine Rule reason and ML reason
+    combined_reasons = []
+    combined_reasons.append(f"Rule Logic: {rule_reason} (Score: {rule_risk_score})")
+    combined_reasons.append(f"AI Model: {ml_reason} (Score: {ml_risk_score:.1f})")
+    combined_reasons.append(f"Final Hybrid Score: {final_risk_score}/100")
+    
+    metadata["reasons"] = combined_reasons + metadata["reasons"] # Prepend detailed reasons
+    
+    # Return in format expected by API
+    return {
+        "fraud_score": final_risk_score / 100.0, # Convert back to 0-1 for API consistency if needed, strictly 0-100 requested? 
+        # API usually expects 0-1 float for fraud_score in many systems, 
+        # but user said "0-100 scale".
+        # Let's look at existing code: "if fraud_score < 0.3". 
+        # Existing code used 0.0 - 1.0.
+        # User request: "Risk Scoring Logic (0–100 Scale)"
+        # Use 0-100 for internal logic, but maybe normalized for `fraud_score` field if downstream expects 0-1.
+        # Let's check the PredictionResponse model. `fraud_score: float`.
+        # I will return the 0-100 score divided by 100 to keep it normalized 0.0-1.0 for the API field which likely feeds UI progress bars.
+        # But I'll make sure the metadata risk level uses the 0-100 logic (which mapped to 0-0.3 etc in old code).
+        # WAIT. Old code: <0.3 (30%), <0.7 (70%).
+        # New rules: 0-30, 31-70, 71-100.
+        # So dividing by 100 perfectly matches the old 0.0-1.0 scale expectation (0.3 = 30).
         
-        # Get the predicted class
-        predicted_class = int(model.predict(X)[0])
-        
-        # Map class to label
-        class_labels = ['safe', 'verify', 'block']
-        predicted_label = class_labels[predicted_class]
-        
-        # Use the probability of the predicted class as the confidence score
-        confidence = float(proba[predicted_class])
-        
-        logger.info(f"Model Prediction: class={predicted_label}, confidence={confidence:.4f}, proba={proba}")
+        "fraud_score": final_risk_score / 100.0, 
+        **metadata
+    }
 
-        # --- POST-PROCESSING: ENFORCE EXACT BUSINESS LOGIC ---
-        # Get normalized country
-        raw_country = str(data_norm.get("country", "")).strip().upper()
-        normalized_country = country_map.get(raw_country, raw_country.lower())
-        is_india = (normalized_country == "india")
-        is_daytime = (6 <= hour < 22)  # 06:00 - 21:59
-        
-        # Apply hard thresholds
-        if is_india:
-            if is_daytime:
-                # India + Daytime
-                if amount < 5000:
-                    predicted_class = 0  # SAFE
-                    override_reason = "Rule: India + Daytime + Amount < 5000"
-                elif amount < 12000:
-                    predicted_class = 1  # VERIFY
-                    override_reason = "Rule: India + Daytime + 5000 <= Amount < 12000"
-                else:
-                    predicted_class = 2  # BLOCK
-                    override_reason = "Rule: India + Daytime + Amount >= 12000"
-            else:
-                # India + Nighttime
-                if amount < 3000:
-                    predicted_class = 0  # SAFE
-                    override_reason = "Rule: India + Nighttime + Amount < 3000"
-                elif amount <= 10000:
-                    predicted_class = 1  # VERIFY
-                    override_reason = "Rule: India + Nighttime + 3000 <= Amount <= 10000"
-                else:
-                    predicted_class = 2  # BLOCK
-                    override_reason = "Rule: India + Nighttime + Amount > 10000"
-        else:
-            # Not India
-            if is_daytime:
-                # Not India + Daytime
-                if amount < 12000:
-                    predicted_class = 1  # VERIFY
-                    override_reason = "Rule: Not India + Daytime + Amount < 12000"
-                else:
-                    predicted_class = 2  # BLOCK
-                    override_reason = "Rule: Not India + Daytime + Amount >= 12000"
-            else:
-                # Not India + Nighttime
-                if amount <= 10000:
-                    predicted_class = 1  # VERIFY
-                    override_reason = "Rule: Not India + Nighttime + Amount <= 10000"
-                else:
-                    predicted_class = 2  # BLOCK
-                    override_reason = "Rule: Not India + Nighttime + Amount > 10000"
-        
-        logger.info(f"Post-Processing: Final class={predicted_class} ({class_labels[predicted_class].upper()}), Reason: {override_reason}")
-
-        # Map to risk levels and actions with randomized jitter for realism
-        if predicted_class == 0:  # Safe
-            level = "Low"
-            action = "Safe"
-            # Natural variance for Safe (range: 0.01 - 0.20)
-            fraud_score = round(random.uniform(0.01, 0.20), 4)
-        elif predicted_class == 1:  # Verify
-            level = "Medium"
-            action = "Verify"
-            # Natural variance for Verify (range: 0.35 - 0.65)
-            fraud_score = round(random.uniform(0.35, 0.65), 4)
-        else:  # Block
-            level = "High"
-            action = "Block"
-            # Natural variance for Block (range: 0.81 - 0.99)
-            fraud_score = round(random.uniform(0.81, 0.99), 4)
-
-        metadata = get_risk_metadata(fraud_score)
-        metadata["risk_level"] = level
-        metadata["recommended_action"] = action
-        
-        # Add override reason to metadata
-        if override_reason:
-            metadata["reasons"].insert(0, override_reason)
-
-        return {
-            "fraud_score": fraud_score,
-            **metadata,
-        }
-
-
-
-    except Exception as e:
-        logger.error(f"Prediction failed: {str(e)}", exc_info=True)
-        metadata = get_risk_metadata(0.5, is_fallback=True)
-        return {
-            "fraud_score": 0.5,
-            **metadata,
-        }
-    except Exception as e:
-        import traceback
-        logger.error(f"[ERROR] Prediction failed: {e}")
-        traceback.print_exc()
-        logger.info(f"[INFO] Using fallback prediction (model error: {e})")
-        metadata = get_risk_metadata(0.5, is_fallback=True)
-        return {
-            "fraud_score": 0.5,
-            **metadata,
-        }
 
 @app.post("/api/predict", response_model=PredictionResponse)
 def predict(
@@ -691,19 +688,19 @@ def predict(
     # Store prediction in database
     prediction = Prediction(
         user_id=current_user.id,
-        amount=request.amount,
-        transaction_time=request.transaction_time,
-        merchant_category=request.merchant_category,
-        country=request.country,
-        device_type=request.device_type,
-        payment_method=request.payment_method,
-        channel=request.channel,
-        merchant_country=request.merchant_country,
-        transaction_count_24h=request.transaction_count_24h,
-        avg_amount_24h=request.avg_amount_24h,
-        fraud_score=prediction_data["fraud_score"],
-        risk_level=prediction_data["risk_level"],
-        recommended_action=prediction_data["recommended_action"],
+        amount=float(request.amount),
+        transaction_time=str(request.transaction_time),
+        merchant_category=str(request.merchant_category),
+        country=str(request.country),
+        device_type=str(request.device_type),
+        payment_method=str(request.payment_method),
+        channel=str(request.channel) if request.channel else None,
+        merchant_country=str(request.merchant_country) if request.merchant_country else None,
+        transaction_count_24h=int(request.transaction_count_24h) if request.transaction_count_24h else None,
+        avg_amount_24h=float(request.avg_amount_24h) if request.avg_amount_24h else None,
+        fraud_score=float(prediction_data["fraud_score"]),
+        risk_level=str(prediction_data["risk_level"]),
+        recommended_action=str(prediction_data["recommended_action"]),
         prediction_date=datetime.utcnow()
     )
     db.add(prediction)
@@ -712,7 +709,7 @@ def predict(
     
     return PredictionResponse(
         prediction_id=prediction.id,
-        fraud_score=prediction_data["fraud_score"],
+        fraud_score=float(prediction_data["fraud_score"]),
         risk_level=prediction_data["risk_level"],
         recommended_action=prediction_data["recommended_action"],
         reasons=prediction_data["reasons"]
@@ -771,9 +768,9 @@ def predict_from_file(
             merchant_country=str(data.get('merchant_country', '')) if data.get('merchant_country') else None,
             transaction_count_24h=int(data.get('transaction_count_24h', 0)) if data.get('transaction_count_24h') else None,
             avg_amount_24h=float(data.get('avg_amount_24h', 0)) if data.get('avg_amount_24h') else None,
-            fraud_score=prediction_data["fraud_score"],
-            risk_level=prediction_data["risk_level"],
-            recommended_action=prediction_data["recommended_action"],
+            fraud_score=float(prediction_data["fraud_score"]),
+            risk_level=str(prediction_data["risk_level"]),
+            recommended_action=str(prediction_data["recommended_action"]),
             prediction_date=datetime.utcnow()
         )
         db.add(prediction)
